@@ -36,6 +36,7 @@ Keep overrides minimal so the shared defaults remain a reliable baseline.
 
 ## Version Directories
 
-Directories such as `12/` (Debian Bookworm) wrap the shared scripts. When
-Bookworm and a later release diverge, copy only the lines that changed into the
-new versioned hook and leave the rest in `common/`.
+Directories such as `11/` (Debian Bullseye), `12/` (Debian Bookworm), and
+`13/` (Debian Trixie) wrap the shared scripts. When a release diverges, copy
+only the lines that changed into the new versioned hook and leave the rest in
+`common/`.

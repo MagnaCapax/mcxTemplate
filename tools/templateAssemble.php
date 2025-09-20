@@ -12,7 +12,8 @@ require_once __DIR__ . '/lib/packageCommon.php';
 // printUsage renders a short help message for operators running the tool.
 function printUsage(): void
 {
-    $script = basename(__FILE__);
+    // Use the invoked script name so wrappers stay in sync with the help text.
+    $script = basename($_SERVER['argv'][0] ?? __FILE__);
     echo "Usage: {$script} --source-host <host> [options]\n";
     echo "\n";
     echo "Options:\n";

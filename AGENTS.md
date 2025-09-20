@@ -2,7 +2,7 @@
 
 ## Project Context
 - **Purpose**: mcxTemplate operates as a templating engine for distro installations; align automation choices with provisioning workflows suitable for that environment.
-- **Shared Library First**: Prefer sourcing helpers from `common/lib/common.sh` or other existing utilities before creating new logic.
+- **Shared Library First**: Prefer reusing the PHP helpers in `common/lib/Common.php` and `lib/common/` before writing new logic.
 
 ## Core Principles
 - **KISS Principle**: Keep implementations simple, readable, and direct. Avoid unnecessary abstractions or over-engineering.
@@ -44,4 +44,3 @@
 ## Workflow Expectations
 - **Required Checks**: Run the linting and operational verification steps outlined above before committing. Document the commands and their results in your work notes.
 - **Future Instructions**: Check for additional `AGENTS.md` files within subdirectories before modifying files there; follow the most specific applicable instructions.
-

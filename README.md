@@ -38,12 +38,49 @@ operations inside the final system.
   (for example `distros/debian/12/tasks`). Missing directories simply skip the
   override stage.
 - `distros/<distro>/*/user.d/` – Optional user-maintained hooks ignored by Git.
-  Place site-specific `.sh` or `.php` scripts here when extra tweaks are
+  Place site-specific `.php` scripts here when extra tweaks are
   required.
 - `distros/common/` – Shared PHP helpers for rendering config files across all
   distros.
-- `lib/common/` – Shared shell helpers (`logging.sh`, `system.sh`).
+<<<<<<< HEAD
+- `src/Common/Lib/` – Shared PHP helpers leveraged outside distro-specific code.
+- `src/Lib/Common/` – Shared shell-interfacing PHP helpers (`Logging.php`, `System.php`).
+=======
+- `lib/common/` – Shared PHP helpers (`Logging.php`, `System.php`).
+>>>>>>> b089dec (Debian template configuration update, splitting and getting further along towards testable case)
 - `tools/` – Packaging helpers for building template tarballs.
+
+## configure.php Options
+
+`distros/configure.php` (and the `installTemplate.php` wrapper) accept additional
+flags so mcxRescue can inject host metadata when it hands execution to the
+template. The most common options are:
+
+- `--hostname=<fqdn>` – Fully-qualified hostname to apply inside the chroot.
+- `--host-ip=<address>` – Primary host IP for `/etc/hosts` when the network is
+  not discoverable automatically.
+- `--network-cidr=<cidr>` / `--gateway=<address>` – Override network detection
+  when the rescue environment cannot infer routes.
+- `--root-device=<path>` – Block device for `/` in the rendered `fstab`.
+- `--home-device=<path|omit>` – Optional `/home` device; pass `omit` to skip the
+  mount entirely.
+- `--ssh-keys-uri=<uri>` – Download and append SSH public keys to
+  `/root/.ssh/authorized_keys`.
+- `--post-config=<uri>` – Fetch and execute a post-configuration script after
+  the template finishes its built-in tasks.
+
+Example usage from mcxRescue:
+
+```
+php /opt/mcxTemplate/installTemplate.php \
+  --hostname=example1.dc.local \
+  --network-cidr=192.0.2.10/24 \
+  --gateway=192.0.2.1 \
+  --root-device=/dev/nvme0n1p2 \
+  --home-device=omit \
+  --ssh-keys-uri="https://provisioning.example.com/keys?id=123" \
+  --post-config="https://provisioning.example.com/scripts/post.sh"
+```
 
 Clone or sync this repository directly to the target system at
 `/opt/mcxTemplate`. The automation expects its working directory to match this

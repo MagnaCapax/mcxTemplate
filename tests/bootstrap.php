@@ -11,7 +11,7 @@ spl_autoload_register(static function (string $class): void {
 
     // Build the file path relative to the repository structure.
     $relativeClass = substr($class, strlen($prefix));
-    $path = __DIR__ . '/../lib/common/' . str_replace('\\', '/', $relativeClass) . '.php';
+    $path = __DIR__ . '/../src/Lib/Common/' . str_replace('\\', '/', $relativeClass) . '.php';
 
     // Include the file when it exists to keep the autoloader quiet otherwise.
     if (is_file($path)) {

@@ -42,7 +42,8 @@ operations inside the final system.
   required.
 - `distros/common/` – Shared PHP helpers for rendering config files across all
   distros.
-- `lib/common/` – Shared shell helpers (`logging.sh`, `system.sh`).
+- `src/Common/Lib/` – Shared PHP helpers leveraged outside distro-specific code.
+- `src/Lib/Common/` – Shared shell-interfacing PHP helpers (`Logging.php`, `System.php`).
 - `tools/` – Packaging helpers for building template tarballs.
 
 Clone or sync this repository directly to the target system at

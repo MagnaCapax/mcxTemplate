@@ -2,7 +2,7 @@
 
 ## Project Context
 - **Purpose**: mcxTemplate operates as a templating engine for distro installations; align automation choices with provisioning workflows suitable for that environment.
-- **Shared Library First**: Prefer reusing the PHP helpers in `common/lib/Common.php` and `lib/common/` before writing new logic.
+- **Shared Library First**: Prefer reusing the PHP helpers in `src/Common/Lib/Common.php` and `src/Lib/Common/` before writing new logic.
 
 ## Core Principles
 - **KISS Principle**: Keep implementations simple, readable, and direct. Avoid unnecessary abstractions or over-engineering.

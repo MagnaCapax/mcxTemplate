@@ -12,9 +12,9 @@ This repository keeps the PHPUnit configuration lightweight so the shared `Lib\\
 1. Ensure PHPUnit is on your `$PATH` or available as `./vendor/bin/phpunit` when using Composer.
 2. Execute the suite from the project root:
    ```bash
-   ./vendor/bin/phpunit --configuration phpunit.xml.dist
+   ./vendor/bin/phpunit --configuration tests/phpunit.xml.dist
    ```
-   *When using the PHAR directly, replace the command above with `php phpunit-9.phar --configuration phpunit.xml.dist`.*
+   *When using the PHAR directly, replace the command above with `php phpunit-9.phar --configuration tests/phpunit.xml.dist`.*
 3. The tests intentionally assert on exit codes rather than stdout/stderr content because `System::run()` forwards output using `passthru`. This keeps the expectations stable across environments with different shell noise levels.
 
 ## Troubleshooting

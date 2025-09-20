@@ -26,6 +26,26 @@ if ($uris === []) {
     return;
 }
 
+$hashConfig = trim((string) (getenv('MCX_SSH_KEYS_SHA256') ?: ''));
+$perUriHashes = [];
+$globalBufferHash = null;
+if ($hashConfig !== '') {
+    foreach (preg_split('/[,\s]+/', $hashConfig) ?: [] as $piece) {
+        $piece = trim((string) $piece);
+        if ($piece === '') {
+            continue;
+        }
+        if (strpos($piece, '=') !== false) {
+            [$key, $hash] = array_map('trim', explode('=', $piece, 2));
+            if ($key !== '' && $hash !== '') {
+                $perUriHashes[$key] = strtolower($hash);
+            }
+            continue;
+        }
+        $globalBufferHash = strtolower($piece);
+    }
+}
+
 $sshDir = '/root/.ssh';
 if (!is_dir($sshDir) && !@mkdir($sshDir, 0700, true)) {
     Common::logWarn('Unable to create /root/.ssh; skipping key installation.');
@@ -41,12 +61,45 @@ foreach ($uris as $uri) {
         Common::logWarn('Failed to download SSH keys from ' . $uri . '.');
         continue;
     }
+
+    $expected = null;
+    if (isset($perUriHashes[$uri])) {
+        $expected = $perUriHashes[$uri];
+    } else {
+        $basename = basename($uri);
+        if ($basename !== '' && isset($perUriHashes[$basename])) {
+            $expected = $perUriHashes[$basename];
+        }
+    }
+
+    if ($expected !== null) {
+        $actual = hash('sha256', $data);
+        if (!hash_equals($expected, strtolower($actual))) {
+            Common::logWarn(
+                'SSH key payload hash mismatch; skipping downloaded data.',
+                ['uri' => $uri, 'expected' => $expected, 'actual' => $actual]
+            );
+            continue;
+        }
+    }
+
     $buffer .= rtrim($data) . PHP_EOL;
 }
 
 if ($buffer === '') {
     Common::logWarn('No SSH keys retrieved; authorized_keys not updated.');
     return;
+}
+
+if ($globalBufferHash !== null) {
+    $actualBufferHash = hash('sha256', $buffer);
+    if (!hash_equals($globalBufferHash, strtolower($actualBufferHash))) {
+        Common::logError(
+            'Aggregated SSH keys hash mismatch; authorized_keys not updated.',
+            ['expected' => $globalBufferHash, 'actual' => $actualBufferHash]
+        );
+        return;
+    }
 }
 
 $prefix = '';

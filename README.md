@@ -49,23 +49,69 @@ operations inside the final system.
 
 `distros/configure.php` (and the `installTemplate.php` wrapper) accept additional
 flags so mcxRescue can inject host metadata when it hands execution to the
-template. The most common options are:
+template. Common options include:
+
+**Host configuration**
 
 - `--hostname=<fqdn>` – Fully-qualified hostname to apply inside the chroot.
 - `--host-ip=<address>` – Primary host IP for `/etc/hosts` when the network is
   not discoverable automatically.
 - `--network-cidr=<cidr>` / `--gateway=<address>` – Override network detection
   when the rescue environment cannot infer routes.
-- `--root-device=<path>` – Block device for `/` in the rendered `fstab`.
-- `--home-device=<path|omit>` – Optional `/home` device; pass `omit` to skip the
-  mount entirely.
+- `--hosts-template=<path>` – Custom `/etc/hosts` template containing
+  `{{SHORT_HOSTNAME}}`, `{{FQDN}}`, and `{{HOST_IP}}` placeholders.
+
+**Storage**
+
+- `--mount=<mount,device[,type[,opts]]>` – Generic mount specification. Repeat
+  for each filesystem (for example, `--mount=/,/dev/nvme0n1p2` and
+  `--mount=/home,/dev/nvme0n1p3`).
+- `--root-device=<path>` / `--home-device=<path|omit>` – Legacy compatibility
+  flags retained for simple environments; values are translated into the mount
+  list automatically.
+
+At least one `--mount` definition for `/` must be supplied (or implied via the
+legacy flags); mcxTemplate validates this before writing `/etc/fstab`.
+
+**Post provisioning**
+
 - `--ssh-keys-uri=<uri>` – Download and append SSH public keys to
   `/root/.ssh/authorized_keys`.
+- `--ssh-keys-sha256=<hash>` – Optional SHA-256 verification for key payloads.
+  Supply `URI=HASH` pairs to verify individual downloads.
 - `--post-config=<uri>` – Fetch and execute a post-configuration script after
-  the template finishes its built-in tasks.
+  the built-in tasks complete.
+- `--post-config-sha256=<hash>` – Expected SHA-256 for the downloaded
+  post-configuration script.
+
+**Operational controls**
+
+- `--log-dir=<path>` – Directory used for per-task log files (defaults to
+  `/var/log/mcxTemplate`).
+- `--skip-tasks=<list>` – Comma- or whitespace-separated task names to skip for
+  a particular run.
+- `--dry-run` – Print the task plan (respecting `--skip-tasks`) without executing
+  any scripts.
 
 The script only requires root once it begins executing tasks; informational
 actions like `--help` can be run without elevated privileges.
+
+### Environment Variables
+
+- `MCX_LOG_DIR` – Directory for per-task log files (defaults to
+  `/var/log/mcxTemplate`). mcxTemplate attempts to create it automatically.
+- `MCX_STRUCTURED_LOG` – Optional JSON lines log written alongside console
+  output. Defaults to `<MCX_LOG_DIR>/structured.log` when unset.
+- `MCX_SKIP_TASKS` – Comma- or whitespace-separated list of task names to skip
+  (case-insensitive; the `.php` suffix is optional).
+- `MCX_HOSTS_TEMPLATE` – Absolute path to a template for `/etc/hosts` containing
+  `{{SHORT_HOSTNAME}}`, `{{FQDN}}`, and `{{HOST_IP}}` placeholders.
+- `MCX_DRY_RUN` – When set to a non-empty value, lists tasks without executing
+  them (equivalent to passing `--dry-run`).
+- `MCX_SSH_KEYS_SHA256` – SHA-256 hash (or `URI=HASH` pairs) for verifying
+  downloaded SSH public keys.
+- `MCX_POST_CONFIG_SHA256` – Expected SHA-256 hash for the downloaded
+  post-configuration script.
 
 Example usage from mcxRescue:
 
@@ -79,6 +125,65 @@ php /opt/mcxTemplate/installTemplate.php \
   --ssh-keys-uri="https://provisioning.example.com/keys?id=123" \
   --post-config="https://provisioning.example.com/scripts/post.sh"
 ```
+
+## Troubleshooting
+
+- **Task warning messages** – When you see `Task <name> exited with status …`,
+  review the per-task log in `${MCX_LOG_DIR}` (default `/var/log/mcxTemplate`).
+  Structured JSON events (including start/finish timestamps and durations) are
+  mirrored to `${MCX_STRUCTURED_LOG}` for easy machine parsing.
+- **Permissions on log directories** – If mcxTemplate cannot create the default
+  log directory, set `MCX_LOG_DIR` to a writable location (for example,
+  `/tmp/mcxTemplate-logs`) before invoking `installTemplate.php`.
+- **Missing provisioning tools** – When utilities such as `ip`, `mdadm`, or
+  `ssh-keygen` are absent, the scripts log a warning and continue with safe
+  defaults. Override values with CLI flags (`--network-cidr`, `--gateway`,
+  etc.) when auto-detection fails.
+- **Skipping problematic steps** – Use `MCX_SKIP_TASKS` to disable individual
+  tasks without editing the repository. Supply the filename (with or without the
+  `.php` suffix), separated by commas or whitespace.
+- **Custom `/etc/hosts` template** – Set `MCX_HOSTS_TEMPLATE=/path/to/hosts.tpl`
+  (or pass `--hosts-template=` once that CLI option lands) to point at a file
+  containing `{{SHORT_HOSTNAME}}`, `{{FQDN}}`, and `{{HOST_IP}}` placeholders.
+  If the file is unreadable the script logs a warning and falls back to the
+  default Debian layout.
+
+## Versioning & Change Management
+
+- Tag releases with a date-based identifier (for example, `2025.09.20`) so
+  rescue environments can pin a known-good template version.
+- Maintain a short CHANGELOG entry for each tag summarising behavioural changes
+  and new environment variables to keep downstream automation teams informed.
+- Track pending and released changes in [`CHANGELOG.md`](CHANGELOG.md). Populate
+  the "Unreleased" section before publishing a new tag.
+- Update mcxRescue alongside mcxTemplate when introducing new flags or
+  environment variables, ensuring both layers stay in lockstep.
+
+## Testing & Operations Guide
+
+1. **Dry run syntax checks** – From the repository root run
+   `find distros -name '*.php' -print0 | xargs -0 -n1 php -l` before packaging a
+   release. CI should mirror this check.
+2. **Chroot smoke test** – In a rescue environment:
+   - Mount the target filesystem and chroot into it.
+   - Copy the repository to `/opt/mcxTemplate`.
+   - Run `php installTemplate.php --hostname=test.example --network-cidr=10.0.0.10/24 --gateway=10.0.0.1 --mount=/,/dev/sda1 --mount=swap,/dev/sda2 --log-dir=/var/log/mcxTemplate-test --skip-tasks=26-run-post-config.php --dry-run` to preview the task plan, then rerun without `--dry-run` to apply changes.
+   - Inspect `/var/log/mcxTemplate-test` and `${MCX_STRUCTURED_LOG}` to confirm
+     task logs and JSON events were emitted.
+3. **Custom hosts template test** – Supply
+   `MCX_HOSTS_TEMPLATE=/root/hosts.tpl` containing placeholders, run
+   `php distros/common/create-hostname.php` manually, and verify the rendered
+   `/etc/hosts` matches expectations and the structured log records the template
+   path.
+4. **Skip list validation** – Set `MCX_SKIP_TASKS="05-clear-log-files task-does-not-exist"`
+   and execute `php installTemplate.php`. Confirm skipped tasks are logged as
+   such and that missing entries do not abort execution.
+5. **Post-config & SSH key fetch** – For online testing, point `--ssh-keys-uri`
+   and `--post-config` at known endpoints; ensure warnings appear when the
+   resources are unreachable.
+6. **Structured log parsing** – Use `tools/analyze-structured-log.php --input=$MCX_STRUCTURED_LOG`
+   to collate per-task summaries, or feed the JSON lines into `jq`/log pipelines
+   for near real-time monitoring.
 
 Clone or sync this repository directly to the target system at
 `/opt/mcxTemplate`. The automation expects its working directory to match this

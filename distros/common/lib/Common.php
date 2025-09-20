@@ -7,21 +7,24 @@ namespace Distros\Common;
 final class Common
 {
     // Keep logging consistent across every script for easy parsing.
-    public static function logInfo(string $message): void
+    public static function logInfo(string $message, array $context = []): void
     {
-        fwrite(STDOUT, '[INFO] ' . $message . PHP_EOL);
+        self::writeLog(STDOUT, '[INFO] ', $message);
+        self::structuredLog('info', $message, $context);
     }
 
     // Provide a middle ground logging level for non-fatal warnings.
-    public static function logWarn(string $message): void
+    public static function logWarn(string $message, array $context = []): void
     {
-        fwrite(STDERR, '[WARN] ' . $message . PHP_EOL);
+        self::writeLog(STDERR, '[WARN] ', $message);
+        self::structuredLog('warn', $message, $context);
     }
 
     // Emit clear error messages that stand out from normal output.
-    public static function logError(string $message): void
+    public static function logError(string $message, array $context = []): void
     {
-        fwrite(STDERR, '[ERROR] ' . $message . PHP_EOL);
+        self::writeLog(STDERR, '[ERROR] ', $message);
+        self::structuredLog('error', $message, $context);
     }
 
     // Stop execution when we encounter an unrecoverable problem.
@@ -105,14 +108,41 @@ final class Common
     }
 
     // Reuse a single wrapper for command execution across scripts.
-    public static function runCommand(array $command, ?int &$status = null): string
+    public static function runCommand(array $command, ?int &$status = null, array $context = [], bool $log = false): string
     {
+        $start = microtime(true);
+        $status = 0;
+
+        $commandString = implode(' ', $command);
+        $context += ['command' => $commandString];
+
+        if ($log) {
+            self::logInfo('Running command.', $context + ['event' => 'command-start']);
+        } else {
+            self::structuredLog('info', 'Running command.', $context + ['event' => 'command-start']);
+        }
+
         $escaped = array_map('escapeshellarg', $command);
         $commandLine = implode(' ', $escaped) . ' 2>/dev/null';
         $outputLines = [];
         exec($commandLine, $outputLines, $exitCode);
         $status = $exitCode;
-        return trim(implode("\n", $outputLines));
+
+        $result = trim(implode("\n", $outputLines));
+        $duration = microtime(true) - $start;
+        $finishContext = $context + ['event' => 'command-finish', 'exit_code' => $exitCode, 'duration_seconds' => round($duration, 4)];
+
+        if ($exitCode !== 0) {
+            self::logWarn('Command exited with non-zero status.', $finishContext);
+        } else {
+            if ($log) {
+                self::logInfo('Command completed successfully.', $finishContext);
+            } else {
+                self::structuredLog('info', 'Command completed successfully.', $finishContext);
+            }
+        }
+
+        return $result;
     }
 
     // Launch a PHP helper script and optionally treat failures as fatal errors.
@@ -120,7 +150,7 @@ final class Common
     {
         if (!is_file($path)) {
             $message = 'Helper missing at ' . $path . '.';
-            self::logWarn($message);
+            self::logWarn($message, ['helper' => basename($path)]);
             return false;
         }
 
@@ -141,7 +171,7 @@ final class Common
         $process = proc_open($command, $descriptorSpec, $pipes, dirname($path));
         if (!is_resource($process)) {
             $message = 'Failed to launch helper ' . basename($path) . '.';
-            self::logWarn($message);
+            self::logWarn($message, ['helper' => basename($path)]);
             return false;
         }
 
@@ -156,10 +186,10 @@ final class Common
         if ($status !== 0) {
             $message = 'Helper ' . basename($path) . ' exited with status ' . (string) $status . '.';
             if ($failOnError) {
-                self::logWarn($message);
+                self::logWarn($message, ['helper' => basename($path), 'exit_code' => $status]);
                 return false;
             }
-            self::logWarn($message);
+            self::logWarn($message, ['helper' => basename($path), 'exit_code' => $status]);
             return false;
         }
 
@@ -201,5 +231,44 @@ final class Common
         }
 
         closedir($handle);
+    }
+
+    private static function writeLog($stream, string $prefix, string $message): void
+    {
+        fwrite($stream, $prefix . $message . PHP_EOL);
+    }
+
+    private static function structuredLog(string $level, string $message, array $context = []): void
+    {
+        $target = getenv('MCX_STRUCTURED_LOG');
+        if ($target === false) {
+            return;
+        }
+
+        $target = trim((string) $target);
+        if ($target === '') {
+            return;
+        }
+
+        $dir = dirname($target);
+        if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) {
+            return;
+        }
+
+        $record = [
+            'timestamp' => date(DATE_ATOM),
+            'level' => $level,
+            'message' => $message,
+        ];
+
+        if ($context !== []) {
+            $record['context'] = $context;
+        }
+
+        @file_put_contents(
+            $target,
+            json_encode($record, JSON_UNESCAPED_SLASHES) . PHP_EOL,
+            FILE_APPEND | LOCK_EX
+        );
     }
 }

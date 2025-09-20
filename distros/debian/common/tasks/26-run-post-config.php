@@ -27,6 +27,15 @@ if ($data === false) {
     return;
 }
 
+$expectedHash = trim((string) (getenv('MCX_POST_CONFIG_SHA256') ?: ''));
+if ($expectedHash !== '') {
+    $actualHash = hash('sha256', $data);
+    if (!hash_equals(strtolower($expectedHash), strtolower($actualHash))) {
+        Common::logError('Post-config script hash mismatch; aborting execution.', ['uri' => $uri, 'expected' => $expectedHash, 'actual' => $actualHash]);
+        return;
+    }
+}
+
 if (@file_put_contents($scriptPath, $data) === false) {
     Common::logWarn('Unable to write downloaded post-config script.');
     return;

@@ -43,27 +43,53 @@ if (@file_put_contents('/etc/hostname', $fqdn . PHP_EOL) === false) {
     // Stop immediately when we cannot update the hostname file on disk.
 }
 
-Common::logInfo('Updated /etc/hostname with ' . $fqdn . '.');
+Common::logInfo('Updated /etc/hostname.', ['fqdn' => $fqdn]);
 // Emit a short note so operators know the hostname changed.
 
-$hostsLines = [
-    '127.0.0.1       localhost',
-    $hostIp . '    ' . $shortHostname . ' ' . $fqdn,
-    '',
-    '# The following lines are desirable for IPv6 capable hosts',
-    '::1     localhost ip6-localhost ip6-loopback',
-    'ff02::1 ip6-allnodes',
-    'ff02::2 ip6-allrouters',
-];
-// Mirror the canonical /etc/hosts layout maintained for Debian images.
+$hostsContent = null;
+$templateUsed = false;
+$hostsTemplate = trim((string) (getenv('MCX_HOSTS_TEMPLATE') ?: ''));
+if ($hostsTemplate !== '' && is_file($hostsTemplate)) {
+    $templateData = @file_get_contents($hostsTemplate);
+    if ($templateData === false) {
+        Common::logWarn(
+            'Unable to read hosts template; falling back to default layout.',
+            ['template' => $hostsTemplate]
+        );
+    } else {
+        $hostsContent = strtr($templateData, [
+            '{{SHORT_HOSTNAME}}' => $shortHostname,
+            '{{FQDN}}' => $fqdn,
+            '{{HOST_IP}}' => $hostIp,
+        ]);
+        $templateUsed = true;
+        Common::logInfo('Rendered /etc/hosts from custom template.', ['template' => $hostsTemplate]);
+    }
+}
 
-$hostsContent = implode(PHP_EOL, $hostsLines) . PHP_EOL;
-// Build the final file content, preserving the trailing newline for POSIX.
+if ($hostsContent === null) {
+    $hostsLines = [
+        '127.0.0.1       localhost',
+        $hostIp . '    ' . $shortHostname . ' ' . $fqdn,
+        '',
+        '# The following lines are desirable for IPv6 capable hosts',
+        '::1     localhost ip6-localhost ip6-loopback',
+        'ff02::1 ip6-allnodes',
+        'ff02::2 ip6-allrouters',
+    ];
+    // Mirror the canonical /etc/hosts layout maintained for Debian images.
+
+    $hostsContent = implode(PHP_EOL, $hostsLines) . PHP_EOL;
+    // Build the final file content, preserving the trailing newline for POSIX.
+}
 
 if (@file_put_contents('/etc/hosts', $hostsContent) === false) {
     Common::fail('Unable to write /etc/hosts.');
     // Halt provisioning so the system does not boot with a broken hosts file.
 }
 
-Common::logInfo('Updated /etc/hosts with IPv4 and IPv6 defaults.');
+Common::logInfo(
+    $templateUsed ? 'Updated /etc/hosts using custom template.' : 'Updated /etc/hosts with IPv4 and IPv6 defaults.',
+    $templateUsed ? ['template' => $hostsTemplate] : []
+);
 // Record success to match the verbosity of the original Bash helper.

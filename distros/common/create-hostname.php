@@ -38,58 +38,49 @@ if ($hostIp === '') {
     // Fallback matches the previous Bash implementation when IP was empty.
 }
 
-if (@file_put_contents('/etc/hostname', $fqdn . PHP_EOL) === false) {
-    Common::fail('Unable to write /etc/hostname.');
-    // Stop immediately when we cannot update the hostname file on disk.
+$hostnameTemplate = Common::findTemplate('hostname.tpl');
+if ($hostnameTemplate === null) {
+    Common::fail('Hostname template is missing for the active distro.');
 }
 
-Common::logInfo('Updated /etc/hostname.', ['fqdn' => $fqdn]);
+Common::applyTemplateToFile($hostnameTemplate, '/etc/hostname', [
+    '{{FQDN}}' => $fqdn,
+]);
+
+Common::logInfo('Updated /etc/hostname.', ['fqdn' => $fqdn, 'template' => $hostnameTemplate]);
 // Emit a short note so operators know the hostname changed.
 
-$hostsContent = null;
-$templateUsed = false;
-$hostsTemplate = trim((string) (getenv('MCX_HOSTS_TEMPLATE') ?: ''));
-if ($hostsTemplate !== '' && is_file($hostsTemplate)) {
-    $templateData = @file_get_contents($hostsTemplate);
-    if ($templateData === false) {
+$hostsTemplateOverride = trim((string) (getenv('MCX_HOSTS_TEMPLATE') ?: ''));
+$templatePath = null;
+$templateSource = 'distro';
+
+if ($hostsTemplateOverride !== '') {
+    if (!is_file($hostsTemplateOverride) || !is_readable($hostsTemplateOverride)) {
         Common::logWarn(
-            'Unable to read hosts template; falling back to default layout.',
-            ['template' => $hostsTemplate]
+            'Unable to read hosts template override; falling back to distro template.',
+            ['template' => $hostsTemplateOverride]
         );
     } else {
-        $hostsContent = strtr($templateData, [
-            '{{SHORT_HOSTNAME}}' => $shortHostname,
-            '{{FQDN}}' => $fqdn,
-            '{{HOST_IP}}' => $hostIp,
-        ]);
-        $templateUsed = true;
-        Common::logInfo('Rendered /etc/hosts from custom template.', ['template' => $hostsTemplate]);
+        $templatePath = $hostsTemplateOverride;
+        $templateSource = 'custom';
     }
 }
 
-if ($hostsContent === null) {
-    $hostsLines = [
-        '127.0.0.1       localhost',
-        $hostIp . '    ' . $shortHostname . ' ' . $fqdn,
-        '',
-        '# The following lines are desirable for IPv6 capable hosts',
-        '::1     localhost ip6-localhost ip6-loopback',
-        'ff02::1 ip6-allnodes',
-        'ff02::2 ip6-allrouters',
-    ];
-    // Mirror the canonical /etc/hosts layout maintained for Debian images.
-
-    $hostsContent = implode(PHP_EOL, $hostsLines) . PHP_EOL;
-    // Build the final file content, preserving the trailing newline for POSIX.
+if ($templatePath === null) {
+    $templatePath = Common::findTemplate('hosts.tpl');
+    if ($templatePath === null) {
+        Common::fail('Hosts template is missing for the active distro.');
+    }
 }
 
-if (@file_put_contents('/etc/hosts', $hostsContent) === false) {
-    Common::fail('Unable to write /etc/hosts.');
-    // Halt provisioning so the system does not boot with a broken hosts file.
-}
+Common::applyTemplateToFile($templatePath, '/etc/hosts', [
+    '{{SHORT_HOSTNAME}}' => $shortHostname,
+    '{{FQDN}}' => $fqdn,
+    '{{HOST_IP}}' => $hostIp,
+]);
 
 Common::logInfo(
-    $templateUsed ? 'Updated /etc/hosts using custom template.' : 'Updated /etc/hosts with IPv4 and IPv6 defaults.',
-    $templateUsed ? ['template' => $hostsTemplate] : []
+    $templateSource === 'custom' ? 'Updated /etc/hosts using custom template.' : 'Updated /etc/hosts using distro template.',
+    ['template' => $templatePath, 'source' => $templateSource]
 );
 // Record success to match the verbosity of the original Bash helper.

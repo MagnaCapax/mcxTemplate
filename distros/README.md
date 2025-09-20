@@ -39,9 +39,16 @@ operators would run the helpers manually for troubleshooting.
 - `<distro>/common/tasks/` – Default task set for the distro. Files use numeric
   prefixes (`10-`, `20-`, …) so alphabetical sorting provides a deterministic
   pipeline that mirrors the provisioning checklist.
+- `<distro>/templates/` – Distro-scoped templates referenced by the shared helpers
+  when rendering configuration files.
 - `<distro>/<version>/tasks/` – Optional overrides when a release needs
   different behaviour. The directory structure mirrors the common tasks so
   maintainers only fork when necessary.
+- `task_preconditions.php` – Optional map of task filenames to prerequisite checks
+  (for example, asserting required binaries exist before a task runs). Each
+  entry is keyed by the task filename and may declare `command`, `env`, or
+  `env_any` checks; tasks lacking their prerequisites are skipped with an
+  informative log message.
 - `user.d/` directories – Git-ignored hooks that downstream operators can use to
   append site-specific actions. They run after the built-in tasks, providing a
   stable escape hatch without patching upstream code.
@@ -60,3 +67,11 @@ operators would run the helpers manually for troubleshooting.
 
 This layered layout keeps common logic in one place and only forks code when a
 release genuinely needs different behaviour.
+
+## Template Assets
+
+Templates live alongside the tasks in `<distro>/templates/` and fall back to `distros/common/templates/`
+when a distro-specific file is absent. They are plain text with `{{PLACEHOLDER}}` markers that the
+shared helpers replace via `str_replace()`. Each render emits a structured `template-apply` log entry
+recording the template path, destination file, and rendered content hash so operators can audit the
+changes applied inside the chroot.

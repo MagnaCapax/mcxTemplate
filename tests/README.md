@@ -4,8 +4,21 @@ This repository keeps the PHPUnit configuration lightweight so the shared `Lib\\
 
 ## Suite Structure
 
-* `Tests\\Lib\\Common\\LoggingTest` runs each logging helper in a fresh PHP process and checks for consistent timestamps, level tags, and formatting even when the input message becomes strange.
-* `Tests\\Lib\\Common\\SystemTest` drives the command helpers through both successful and failing scenarios, including exit-code assertions that run in isolated PHP processes so PHPUnit itself does not terminate.
+Tests live under `tests/unit/` and follow PSR-4-style namespaces rooted at `Tests\Unit`. Key suites include:
+
+* `Tests\\Unit\\Provisioning\\ConfiguratorTest` covering the argument parser, mount normalisation,
+  skip-set handling, and MCX_MOUNT_SPEC persistence used by `distros/configure.php`.
+* `Tests\\Unit\\Provisioning\\CommonTemplateTest` exercising template discovery, structured logging,
+  and primary interface detection in `Lib\\Provisioning\Common` across a mix of edge cases.
+* `Tests\\Unit\\Tools\\TemplateCloneTest` validating `tools/templateAssemble.php` by staging temporary
+  rootfs/template/extras directories and asserting the tarball layout.
+* `Tests\\Unit\\Tools\\CheckTemplateTest` running `tools/check-template.php` against synthetic directories
+  and tarballs to ensure the auditor flags missing distro assets with the expected exit codes.
+* `Tests\\Unit\\Common\\SystemTest` driving the command helpers through both successful and failing
+  scenarios, including exit-code assertions that run in isolated PHP processes so PHPUnit itself does
+  not terminate.
+* `Tests\\Unit\\Common\\LoggingTest` (when enabled) running each logging helper in a fresh PHP process
+  to verify formatting.
 
 ## Prerequisites
 
@@ -18,9 +31,9 @@ This repository keeps the PHPUnit configuration lightweight so the shared `Lib\\
 1. Ensure PHPUnit is on your `$PATH` or available as `./vendor/bin/phpunit` when using Composer.
 2. Execute the suite from the project root with whichever PHPUnit binary you installed:
    ```bash
-   php phpunit.phar --configuration tests/phpunit.xml.dist
+   ./vendor/bin/phpunit --configuration tests/phpunit.xml.dist
    ```
-   *When using Composer's binaries, replace the command above with `./vendor/bin/phpunit --configuration tests/phpunit.xml.dist`.*
+   *When using the PHAR directly, replace the command above with `php phpunit-9.phar --configuration tests/phpunit.xml.dist`.*
 3. The tests intentionally assert on exit codes rather than stdout/stderr content because `System::run()` forwards output using `passthru`. This keeps the expectations stable across environments with different shell noise levels.
 
 ### Focused Execution

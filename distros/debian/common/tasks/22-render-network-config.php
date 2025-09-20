@@ -61,6 +61,10 @@ putenv('GATEWAY=' . $gateway);
 $_ENV['NETWORK_CIDR'] = $cidrValue;
 $_ENV['GATEWAY'] = $gateway;
 
+$interface = Common::detectPrimaryInterface();
+putenv('NETWORK_INTERFACE=' . $interface);
+$_ENV['NETWORK_INTERFACE'] = $interface;
+
 $success = Common::runPhpScript($repoRoot . '/distros/common/create-network-config.php', [], false);
 if (!$success) {
     Common::logWarn('Network helper failed; retaining existing interfaces file.');

@@ -101,18 +101,13 @@ if ($mountEntries === []) {
     return;
 }
 
-$lines = [
-    '# /etc/fstab: static file system information.',
-    '#',
-    "# Use 'blkid' to print the universally unique identifier for a device.",
-    '# <file system> <mount point>   <type>  <options>       <dump>  <pass>',
-];
+$entryLines = [];
 
 foreach ($mountEntries as $entry) {
     if (($entry['is_swap'] ?? false) === true) {
         $type = $entry['type'] ?? 'swap';
         $options = $entry['options'] ?? 'sw';
-        $lines[] = sprintf('%s none            %s    %s              %d       %d', $entry['device'], $type, $options, $entry['dump'] ?? 0, $entry['pass'] ?? 0);
+        $entryLines[] = sprintf('%s none            %s    %s              %d       %d', $entry['device'], $type, $options, $entry['dump'] ?? 0, $entry['pass'] ?? 0);
         continue;
     }
 
@@ -122,17 +117,23 @@ foreach ($mountEntries as $entry) {
     $dump = $entry['dump'] ?? 0;
     $pass = $entry['pass'] ?? ($mount === '/' ? 1 : 2);
 
-    $lines[] = sprintf('%s %-15s %s    %-14s %d       %d', $entry['device'], $mount, $type, $options, $dump, $pass);
+    $entryLines[] = sprintf('%s %-15s %s    %-14s %d       %d', $entry['device'], $mount, $type, $options, $dump, $pass);
 }
 
-$payload = implode(PHP_EOL, $lines) . PHP_EOL;
+$payloadBody = implode(PHP_EOL, $entryLines) . PHP_EOL;
 
-if (@file_put_contents('/etc/fstab', $payload) === false) {
-    Common::logWarn('Unable to write /etc/fstab; leaving existing file intact.');
+$fstabTemplate = Common::findTemplate('fstab.tpl');
+if ($fstabTemplate === null) {
+    Common::logWarn('fstab template missing; existing /etc/fstab preserved.');
     return;
 }
 
+Common::applyTemplateToFile($fstabTemplate, '/etc/fstab', [
+    '{{FSTAB_ENTRIES}}' => $payloadBody,
+]);
+
 Common::logInfo('Updated /etc/fstab with current mount specification.', [
+    'template' => $fstabTemplate,
     'entries' => array_map(static function (array $entry): array {
         return [
             'mount' => $entry['original_mount'] ?? $entry['mount'] ?? '',

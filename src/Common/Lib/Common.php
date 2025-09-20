@@ -3,44 +3,45 @@ declare(strict_types=1);
 
 namespace Common\Lib;
 
-use Lib\Common\Logging;
+use Lib\Provisioning\Common as ProvisioningCommon;
 use RuntimeException;
 
-// CommonHelpers reproduces the shared utility surface previously exported by the Bash version.
+// CommonHelpers exposes a narrow facade over the shared provisioning helpers.
 final class CommonHelpers
 {
     // logInfo mirrors the simple INFO logger expected by provisioning scripts.
     public static function logInfo(string $message): void
     {
-        Logging::info($message);
+        ProvisioningCommon::logInfo($message);
     }
 
     // logWarn mirrors the WARN logger.
     public static function logWarn(string $message): void
     {
-        Logging::warn($message);
+        ProvisioningCommon::logWarn($message);
     }
 
     // logError mirrors the ERROR logger.
     public static function logError(string $message): void
     {
-        Logging::error($message);
+        ProvisioningCommon::logError($message);
     }
 
     // die reports the error then stops execution with the provided code (default 1).
     public static function die(string $message, int $code = 1): void
     {
-        self::logError($message);
+        ProvisioningCommon::logError($message);
         exit($code);
     }
 
     // requireCommand ensures a binary exists before the caller relies on it.
     public static function requireCommand(string $command): void
     {
-        $result = shell_exec('command -v ' . escapeshellarg($command) . ' 2>/dev/null');
-        if (!is_string($result) || trim($result) === '') {
-            self::die(sprintf("Required command '%s' is not available.", $command));
+        if (ProvisioningCommon::commandExists($command)) {
+            return;
         }
+
+        self::die(sprintf("Required command '%s' is not available.", $command));
     }
 
     // requireReadableFile verifies that the provided path exists and is readable.

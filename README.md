@@ -42,8 +42,22 @@ operations inside the final system.
   required.
 - `distros/common/` – Shared PHP helpers for rendering config files across all
   distros.
+- `distros/task_preconditions.php` – Optional registry for task-level
+  preconditions (for example, requiring binaries before execution).
 - `lib/common/` – Shared PHP helpers (`Logging.php`, `System.php`).
 - `tools/` – Packaging helpers for building template tarballs.
+
+### Template Rendering
+
+Provisioning tasks render configuration files from simple templates to keep the system state
+predictable. Templates live under `distros/<distro>/templates/` with fallbacks in
+`distros/common/templates/`. Each file uses placeholder tokens such as `{{FQDN}}`,
+`{{INTERFACE}}`, or `{{FSTAB_ENTRIES}}`. The helpers substitute these tokens with a straight
+`str_replace()` call, so template changes remain easy to audit.
+
+Every call to `Common::applyTemplateToFile()` emits a structured `template-apply` log event
+containing the template path, destination file, and SHA-256 hash of the rendered payload. This
+makes it straightforward to review which files changed during a provisioning run.
 
 ## configure.php Options
 
@@ -60,6 +74,8 @@ template. Common options include:
   when the rescue environment cannot infer routes.
 - `--hosts-template=<path>` – Custom `/etc/hosts` template containing
   `{{SHORT_HOSTNAME}}`, `{{FQDN}}`, and `{{HOST_IP}}` placeholders.
+- `--primary-interface=<name>` – Override the detected primary network interface used when
+  rendering distro templates.
 
 **Storage**
 
@@ -106,6 +122,7 @@ actions like `--help` can be run without elevated privileges.
   (case-insensitive; the `.php` suffix is optional).
 - `MCX_HOSTS_TEMPLATE` – Absolute path to a template for `/etc/hosts` containing
   `{{SHORT_HOSTNAME}}`, `{{FQDN}}`, and `{{HOST_IP}}` placeholders.
+- `MCX_PRIMARY_INTERFACE` – Interface name to prefer when rendering network configuration templates.
 - `MCX_DRY_RUN` – When set to a non-empty value, lists tasks without executing
   them (equivalent to passing `--dry-run`).
 - `MCX_SSH_KEYS_SHA256` – SHA-256 hash (or `URI=HASH` pairs) for verifying
@@ -126,6 +143,12 @@ php /opt/mcxTemplate/installTemplate.php \
   --post-config="https://provisioning.example.com/scripts/post.sh"
 ```
 
+Single-line invocation for automation harnesses:
+
+```
+php /opt/mcxTemplate/installTemplate.php --hostname=example1.dc.local --network-cidr=192.0.2.10/24 --gateway=192.0.2.1 --mount=/,/dev/nvme0n1p2 --mount=swap,/dev/nvme0n1p3 --ssh-keys-uri="https://provisioning.example.com/keys?id=123"
+```
+
 ## Troubleshooting
 
 - **Task warning messages** – When you see `Task <name> exited with status …`,
@@ -139,6 +162,10 @@ php /opt/mcxTemplate/installTemplate.php \
   `ssh-keygen` are absent, the scripts log a warning and continue with safe
   defaults. Override values with CLI flags (`--network-cidr`, `--gateway`,
   etc.) when auto-detection fails.
+- **Task preconditions** – If a task logs `precondition-skipped`, the entry in
+  `distros/task_preconditions.php` blocked execution (for example, the `mdadm`
+  binary was unavailable). Install the dependency or adjust the precondition map
+  before re-running the template.
 - **Skipping problematic steps** – Use `MCX_SKIP_TASKS` to disable individual
   tasks without editing the repository. Supply the filename (with or without the
   `.php` suffix), separated by commas or whitespace.
@@ -184,6 +211,13 @@ php /opt/mcxTemplate/installTemplate.php \
 6. **Structured log parsing** – Use `tools/analyze-structured-log.php --input=$MCX_STRUCTURED_LOG`
    to collate per-task summaries, or feed the JSON lines into `jq`/log pipelines
    for near real-time monitoring.
+
+After installing PHPUnit 9+, execute `./vendor/bin/phpunit --configuration tests/phpunit.xml.dist`
+to run the unit tests. The suite currently exercises the Configurator helpers, provisioning template
+utilities, tooling assembly scripts, and the shared Common abstractions to keep regressions obvious.
+
+For the full template capture workflow, see `docs/template-authoring.md`, which outlines how to stage a
+reference system, optionally prune unique identifiers, and produce the tarball with the packaging helpers.
 
 Clone or sync this repository directly to the target system at
 `/opt/mcxTemplate`. The automation expects its working directory to match this

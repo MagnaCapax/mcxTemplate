@@ -9,6 +9,7 @@ declare(strict_types=1);
 // Strict types keep argument handling predictable across the entry point.
 
 use Distros\Common\Common;
+use Lib\Provisioning\Configurator;
 // Reuse the shared logging and guard helpers for consistent behaviour.
 
 $scriptDir = __DIR__;
@@ -18,11 +19,24 @@ $repoRoot = dirname($scriptDir);
 // Derive the repository root by walking one level up from the distros folder.
 
 require $scriptDir . '/common/lib/Common.php';
+require $repoRoot . '/src/Lib/Provisioning/Configurator.php';
 // Load the helper definitions exactly once before any logic executes.
 
 putenv('MCX_TEMPLATE_ROOT=' . $repoRoot);
 $_ENV['MCX_TEMPLATE_ROOT'] = $repoRoot;
 // Share the repository root with every downstream task via environment vars.
+
+$preconditionsFile = $repoRoot . '/distros/task_preconditions.php';
+$taskPreconditions = [];
+if (is_file($preconditionsFile)) {
+    $loaded = require $preconditionsFile;
+    if (is_array($loaded)) {
+        foreach ($loaded as $task => $checks) {
+            $taskPreconditions[strtolower((string) $task)] = $checks;
+        }
+    }
+}
+$GLOBALS['MCX_TASK_PRECONDITIONS'] = $taskPreconditions;
 
 /**
  * Render the usage banner for interactive operators.
@@ -37,6 +51,7 @@ function showUsage(): void
     echo "  --network-cidr=CIDR        Primary interface CIDR block." . PHP_EOL;
     echo "  --gateway=IP               Default gateway address." . PHP_EOL;
     echo "  --hosts-template=PATH      Custom template for /etc/hosts placeholders." . PHP_EOL;
+    echo "  --primary-interface=NAME   Override detected primary interface for templates." . PHP_EOL;
     echo PHP_EOL;
     echo "Storage:" . PHP_EOL;
     echo "  --mount=MOUNT,DEV[,TYPE[,OPTS]]  Generic mount specification." . PHP_EOL;
@@ -66,87 +81,93 @@ function showUsage(): void
  */
 function parseArguments(array $arguments): array
 {
-    $options = [];
-    $positionals = [];
-    $multi = [
-        'mount' => [],
+    $parsed = Configurator::parseArguments($arguments);
+
+    return [
+        $parsed['options'],
+        $parsed['positionals'],
+        $parsed['multi'],
+        $parsed['help'],
     ];
-    $known = [
-        'distro',
-        'version',
-        'hostname',
-        'host-ip',
-        'network-cidr',
-        'gateway',
-        'post-config',
-        'post-config-sha256',
-        'ssh-keys-uri',
-        'ssh-keys-sha256',
-        'root-device',
-        'home-device',
-        'log-dir',
-        'skip-tasks',
-        'hosts-template',
-        'mount',
-        'dry-run',
-    ];
-
-    while ($arguments !== []) {
-        $current = array_shift($arguments);
-
-        if ($current === '--help' || $current === '-h') {
-            showUsage();
-            exit(0);
-        }
-
-        if ($current === '--') {
-            $positionals = array_merge($positionals, $arguments);
-            break;
-        }
-
-        if (strncmp($current, '--', 2) !== 0) {
-            $positionals[] = $current;
-            continue;
-        }
-
-        $eqPos = strpos($current, '=');
-        if ($eqPos !== false) {
-            $name = substr($current, 2, $eqPos - 2);
-            $value = substr($current, $eqPos + 1);
-        } else {
-            $name = substr($current, 2);
-            if ($arguments !== [] && strncmp((string) $arguments[0], '--', 2) !== 0) {
-                $value = array_shift($arguments);
-            } else {
-                $value = '';
-            }
-        }
-
-        if (!in_array($name, $known, true)) {
-            Common::logWarn("Ignoring unknown option --{$name}.", ['option' => $name]);
-            continue;
-        }
-
-        if ($name === 'mount') {
-            $multi['mount'][] = $value;
-            continue;
-        }
-
-        if ($name === 'dry-run' && $value === '') {
-            $options[$name] = '1';
-            continue;
-        }
-
-        $options[$name] = $value;
-    }
-
-    return [$options, $positionals, $multi];
 }
 
 function setEnvironmentValue(string $key, string $value): void
 {
-    putenv($key . '=' . $value);
-    $_ENV[$key] = $value;
+    Configurator::setEnvironmentValue($key, $value);
+}
+
+/**
+ * Determine whether a task's preconditions are satisfied.
+ */
+function taskPreconditionsMet(string $scriptName, array $contextBase = []): bool
+{
+    global $MCX_TASK_PRECONDITIONS;
+
+    $key = strtolower($scriptName);
+    if (!isset($MCX_TASK_PRECONDITIONS[$key])) {
+        return true;
+    }
+
+    $checks = $MCX_TASK_PRECONDITIONS[$key];
+    if (!is_array($checks)) {
+        return true;
+    }
+
+    foreach ($checks as $check) {
+        if (!is_array($check) || !isset($check['type'])) {
+            continue;
+        }
+
+        $type = strtolower((string) $check['type']);
+        if ($type === 'command') {
+            $command = (string) ($check['value'] ?? '');
+            if ($command === '') {
+                continue;
+            }
+            if (!Common::commandExists($command)) {
+                Common::logInfo(
+                    'Skipping task; required command missing.',
+                    $contextBase + ['event' => 'precondition-skipped', 'reason' => 'command', 'command' => $command]
+                );
+                return false;
+            }
+        } elseif ($type === 'env') {
+            $envName = (string) ($check['value'] ?? '');
+            if ($envName === '') {
+                continue;
+            }
+            $value = getenv($envName);
+            if ($value === false || trim((string) $value) === '') {
+                Common::logInfo(
+                    'Skipping task; required environment variable missing.',
+                    $contextBase + ['event' => 'precondition-skipped', 'reason' => 'env', 'env' => $envName]
+                );
+                return false;
+            }
+        } elseif ($type === 'env_any') {
+            $names = $check['names'] ?? [];
+            if (!is_array($names)) {
+                continue;
+            }
+            $found = false;
+            foreach ($names as $name) {
+                $value = getenv((string) $name);
+                if ($value !== false && trim((string) $value) !== '') {
+                    $found = true;
+                    break;
+                }
+            }
+            if (!$found) {
+                Common::logInfo(
+                    'Skipping task; none of the required environment variables are set.',
+                    $contextBase + ['event' => 'precondition-skipped', 'reason' => 'env_any', 'env' => $names]
+                );
+                return false;
+            }
+        }
+    }
+
+    return true;
 }
 
 /**
@@ -154,27 +175,7 @@ function setEnvironmentValue(string $key, string $value): void
  */
 function parseMountOption(string $spec): ?array
 {
-    $parts = array_map('trim', explode(',', $spec));
-    if (count($parts) < 2) {
-        Common::logWarn('Ignoring invalid --mount definition; requires at least mountpoint and device.', ['value' => $spec]);
-        return null;
-    }
-
-    [$mountPoint, $device] = $parts;
-    $type = $parts[2] ?? '';
-    $options = $parts[3] ?? '';
-
-    if ($mountPoint === '' || $device === '') {
-        Common::logWarn('Ignoring invalid --mount definition; empty mountpoint or device.', ['value' => $spec]);
-        return null;
-    }
-
-    return [
-        'mount' => $mountPoint,
-        'device' => $device,
-        'type' => $type,
-        'options' => $options,
-    ];
+    return Configurator::parseMountOption($spec);
 }
 
 /**
@@ -182,47 +183,7 @@ function parseMountOption(string $spec): ?array
  */
 function normalizeMountEntries(array $entries): array
 {
-    $normalized = [];
-
-    foreach ($entries as $entry) {
-        $mountPoint = $entry['mount'];
-        $originalMount = $entry['original_mount'] ?? $mountPoint;
-        $device = $entry['device'];
-        $type = $entry['type'] ?? '';
-        $options = $entry['options'] ?? '';
-
-        $isSwap = strtolower($originalMount) === 'swap';
-        if ($isSwap) {
-            $mount = 'none';
-            $type = $type !== '' ? $type : 'swap';
-            $options = $options !== '' ? $options : 'sw';
-            $pass = 0;
-        } else {
-            if ($mountPoint === '' || $mountPoint[0] !== '/') {
-                Common::logWarn('Ignoring mount definition without absolute mountpoint.', ['mount' => $mountPoint, 'device' => $device]);
-                continue;
-            }
-            $mount = $mountPoint;
-            $type = $type !== '' ? $type : 'ext4';
-            if ($options === '') {
-                $options = $mount === '/' ? 'errors=remount-ro' : 'defaults';
-            }
-            $pass = $mount === '/' ? 1 : 2;
-        }
-
-        $normalized[] = [
-            'mount' => $mount,
-            'original_mount' => $originalMount,
-            'device' => $device,
-            'type' => $type,
-            'options' => $options,
-            'dump' => $entry['dump'] ?? 0,
-            'pass' => $entry['pass'] ?? $pass,
-            'is_swap' => $isSwap,
-        ];
-    }
-
-    return $normalized;
+    return Configurator::normalizeMountEntries($entries);
 }
 
 /**
@@ -230,39 +191,7 @@ function normalizeMountEntries(array $entries): array
  */
 function buildLegacyMountSpec(): array
 {
-    $defaults = [
-        'ROOT_DEVICE' => '/dev/nvme0n1p2',
-        'HOME_DEVICE' => '/dev/nvme0n1p3',
-        'BOOT_DEVICE' => '/dev/md1',
-        'SWAP_DEVICE' => '/dev/nvme0n1p1',
-    ];
-
-    $spec = [];
-
-    $root = trim((string) (getenv('ROOT_DEVICE') ?: $defaults['ROOT_DEVICE']));
-    if ($root !== '') {
-        $spec[] = ['mount' => '/', 'original_mount' => '/', 'device' => $root, 'type' => 'ext4', 'options' => 'errors=remount-ro', 'pass' => 1];
-    }
-
-    $home = getenv('HOME_DEVICE');
-    if ($home !== false) {
-        $homeValue = trim((string) $home);
-        if ($homeValue !== '' && strcasecmp($homeValue, 'omit') !== 0) {
-            $spec[] = ['mount' => '/home', 'original_mount' => '/home', 'device' => $homeValue, 'type' => 'ext4', 'options' => 'defaults', 'pass' => 2];
-        }
-    }
-
-    $boot = trim((string) (getenv('BOOT_DEVICE') ?: $defaults['BOOT_DEVICE']));
-    if ($boot !== '') {
-        $spec[] = ['mount' => '/boot', 'original_mount' => '/boot', 'device' => $boot, 'type' => 'ext4', 'options' => 'defaults', 'pass' => 2];
-    }
-
-    $swap = trim((string) (getenv('SWAP_DEVICE') ?: $defaults['SWAP_DEVICE']));
-    if ($swap !== '') {
-        $spec[] = ['mount' => 'swap', 'original_mount' => 'swap', 'device' => $swap, 'type' => 'swap', 'options' => 'sw', 'pass' => 0];
-    }
-
-    return $spec;
+    return Configurator::buildLegacyMountSpec();
 }
 
 /**
@@ -270,46 +199,18 @@ function buildLegacyMountSpec(): array
  */
 function setLegacyEnvFromMounts(array $normalizedMounts): void
 {
-    $seen = [
-        'ROOT_DEVICE' => false,
-        'HOME_DEVICE' => false,
-        'BOOT_DEVICE' => false,
-        'SWAP_DEVICE' => false,
-    ];
-
-    foreach ($normalizedMounts as $entry) {
-        if ($entry['is_swap']) {
-            setEnvironmentValue('SWAP_DEVICE', $entry['device']);
-            $seen['SWAP_DEVICE'] = true;
-            continue;
-        }
-
-        if ($entry['mount'] === '/') {
-            setEnvironmentValue('ROOT_DEVICE', $entry['device']);
-            $seen['ROOT_DEVICE'] = true;
-        } elseif ($entry['mount'] === '/home') {
-            setEnvironmentValue('HOME_DEVICE', $entry['device']);
-            $seen['HOME_DEVICE'] = true;
-        } elseif ($entry['mount'] === '/boot') {
-            setEnvironmentValue('BOOT_DEVICE', $entry['device']);
-            $seen['BOOT_DEVICE'] = true;
-        }
-    }
-
-    foreach ($seen as $env => $matched) {
-        if ($matched) {
-            continue;
-        }
-        putenv($env);
-        unset($_ENV[$env]);
-    }
+    Configurator::setLegacyEnvFromMounts($normalizedMounts);
 }
 
 $args = $argv;
 array_shift($args);
 // Remove the script name from the argument list for easier handling.
 
-[$cliOptions, $args, $multiOptions] = parseArguments($args);
+[$cliOptions, $args, $multiOptions, $helpRequested] = parseArguments($args);
+if ($helpRequested) {
+    showUsage();
+    exit(0);
+}
 // Separate CLI options from positional distro arguments.
 
 $distroId = trim((string) ($cliOptions['distro'] ?? (getenv('MCX_DISTRO_ID') ?: ($args[0] ?? ''))));
@@ -389,38 +290,15 @@ if ($skipCli !== '') {
 }
 
 $skipSource = trim((string) (getenv('MCX_SKIP_TASKS') ?: ''));
-$skipTaskSet = [];
-$skipTaskDisplay = [];
-if ($skipSource !== '') {
-    $parts = preg_split('/[,\s]+/', $skipSource) ?: [];
-    foreach ($parts as $part) {
-        $normalized = strtolower(trim((string) $part));
-        if ($normalized === '') {
-            continue;
-        }
-        if (!in_array($normalized, $skipTaskDisplay, true)) {
-            $skipTaskDisplay[] = $normalized;
-        }
+$skipData = Configurator::buildSkipTaskSet($skipSource);
+$skipTaskSet = $skipData['set'];
+$skipTaskDisplay = $skipData['display'];
 
-        $candidates = [$normalized];
-        $base = basename($normalized);
-        if ($base !== '' && $base !== $normalized) {
-            $candidates[] = $base;
-        }
-
-        foreach ($candidates as $candidate) {
-            $skipTaskSet[$candidate] = true;
-            if (substr($candidate, -4) !== '.php') {
-                $skipTaskSet[$candidate . '.php'] = true;
-            }
-        }
-    }
-    if ($skipTaskDisplay !== []) {
-        Common::logInfo(
-            'Tasks disabled via MCX_SKIP_TASKS: ' . implode(', ', $skipTaskDisplay),
-            ['skip_tasks' => $skipTaskDisplay]
-        );
-    }
+if ($skipTaskDisplay !== []) {
+    Common::logInfo(
+        'Tasks disabled via MCX_SKIP_TASKS: ' . implode(', ', $skipTaskDisplay),
+        ['skip_tasks' => $skipTaskDisplay]
+    );
 }
 $GLOBALS['MCX_SKIP_TASKS_SET'] = $skipTaskSet;
 
@@ -462,12 +340,7 @@ if (!$hasRoot) {
     Common::fail('At least one mount definition for / is required.');
 }
 
-$encodedMounts = json_encode($normalizedMounts);
-if ($encodedMounts === false) {
-    Common::fail('Unable to encode mount specification.');
-}
-
-setEnvironmentValue('MCX_MOUNT_SPEC', $encodedMounts);
+Configurator::storeMountSpecification($normalizedMounts);
 setLegacyEnvFromMounts($normalizedMounts);
 
 Common::logInfo(
@@ -513,6 +386,7 @@ $optionEnvMap = [
     'home-device' => 'HOME_DEVICE',
     'log-dir' => 'MCX_LOG_DIR',
     'hosts-template' => 'MCX_HOSTS_TEMPLATE',
+    'primary-interface' => 'MCX_PRIMARY_INTERFACE',
 ];
 
 foreach ($optionEnvMap as $option => $envName) {
@@ -538,43 +412,7 @@ foreach ($optionEnvMap as $option => $envName) {
  */
 function detectDistro(string $currentId, string $currentVersion): array
 {
-    $distroId = $currentId;
-    $distroVersion = $currentVersion;
-    // Start with the supplied identifiers and fill in any missing pieces.
-
-    if ($distroId !== '' && $distroVersion !== '') {
-        return [$distroId, $distroVersion];
-        // Short-circuit when both values were explicitly provided by caller.
-    }
-
-    $osRelease = '/etc/os-release';
-    if (!is_file($osRelease)) {
-        return [$distroId, $distroVersion];
-        // Leave detection untouched if the metadata file is absent entirely.
-    }
-
-    $data = @parse_ini_file($osRelease);
-    if ($data === false) {
-        return [$distroId, $distroVersion];
-        // Fail softly so the operator can fall back to manual overrides later.
-    }
-
-    if ($distroId === '' && isset($data['ID'])) {
-        $distroId = trim((string) $data['ID']);
-        // Mirror the behaviour of the historical Bash helper for ID values.
-    }
-
-    if ($distroVersion === '' && isset($data['VERSION_ID'])) {
-        $distroVersion = trim((string) $data['VERSION_ID']);
-        // Prefer VERSION_ID so we align with numeric release identifiers.
-    }
-
-    if ($distroVersion === '' && isset($data['VERSION_CODENAME'])) {
-        $distroVersion = trim((string) $data['VERSION_CODENAME']);
-        // Fall back to VERSION_CODENAME when numeric identifiers are missing.
-    }
-
-    return [$distroId, $distroVersion];
+    return Configurator::detectDistro($currentId, $currentVersion);
 }
 
 [$distroId, $distroVersion] = detectDistro($distroId, $distroVersion);
@@ -643,6 +481,10 @@ function runTaskScript(string $path): void
     }
 
     $contextBase = ['task' => $scriptName, 'path' => $path];
+
+    if (!taskPreconditionsMet($scriptName, $contextBase)) {
+        return;
+    }
 
     if ($MCX_DRY_RUN) {
         Common::logInfo('DRY RUN: would execute ' . $scriptName . '.', $contextBase + ['event' => 'dry-run']);

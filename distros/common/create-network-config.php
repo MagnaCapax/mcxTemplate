@@ -27,35 +27,28 @@ if ($cidr === '') {
 $gateway = trim((string) (getenv('GATEWAY') ?: ''));
 // Accept an optional gateway while keeping empty strings clean.
 
-$lines = [
-    '# This file describes the network interfaces available on your system',
-    '# and how to activate them. For more information, see interfaces(5).',
-    '',
-    'source /etc/network/interfaces.d/*',
-    '',
-    '# The loopback network interface',
-    'auto lo',
-    'iface lo inet loopback',
-    '',
-    '# The primary network interface',
-    'auto eth0',
-    'iface eth0 inet static',
-    '    address ' . $cidr,
+$interface = trim((string) (getenv('NETWORK_INTERFACE') ?: ''));
+if ($interface === '') {
+    $interface = Common::detectPrimaryInterface();
+}
+
+$templatePath = Common::findTemplate('network/interfaces.tpl');
+if ($templatePath === null) {
+    Common::fail('Network interface template is missing for the active distro.');
+}
+
+$replacements = [
+    '{{INTERFACE}}' => $interface,
+    '{{CIDR}}' => $cidr,
+    '{{GATEWAY_LINE}}' => $gateway !== '' ? '    gateway ' . $gateway : '',
 ];
-// Compose the canonical Debian interface configuration for eth0.
 
-if ($gateway !== '') {
-    $lines[] = '    gateway ' . $gateway;
-    // Append the gateway line only when we actually detected one.
-}
+Common::applyTemplateToFile($templatePath, '/etc/network/interfaces', $replacements);
 
-$content = implode(PHP_EOL, $lines) . PHP_EOL;
-// Join everything together and keep the trailing newline intact.
-
-if (@file_put_contents('/etc/network/interfaces', $content) === false) {
-    Common::fail('Unable to write /etc/network/interfaces.');
-    // Abort loudly so provisioning stops on partial network configs.
-}
-
-Common::logInfo('Updated /etc/network/interfaces via PHP helper.');
+Common::logInfo('Updated /etc/network/interfaces via template.', [
+    'cidr' => $cidr,
+    'gateway' => $gateway,
+    'interface' => $interface,
+    'template' => $templatePath,
+]);
 // Provide a friendly confirmation for the provisioning logs.

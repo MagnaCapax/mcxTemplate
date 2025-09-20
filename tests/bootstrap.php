@@ -1,19 +1,21 @@
 <?php
 declare(strict_types=1);
 
-// Register an autoloader so PHPUnit can resolve shared library classes.
+$composerAutoload = __DIR__ . '/../vendor/autoload.php';
+if (is_file($composerAutoload)) {
+    require_once $composerAutoload;
+}
+
+// Register a lightweight fallback autoloader for the Lib namespace when Composer is unavailable.
 spl_autoload_register(static function (string $class): void {
-    // We only serve classes from the Lib\Common namespace here.
-    $prefix = 'Lib\\Common\\';
+    $prefix = 'Lib\\';
     if (strncmp($class, $prefix, strlen($prefix)) !== 0) {
         return;
     }
 
-    // Build the file path relative to the repository structure.
     $relativeClass = substr($class, strlen($prefix));
-    $path = __DIR__ . '/../src/Lib/Common/' . str_replace('\\', '/', $relativeClass) . '.php';
+    $path = __DIR__ . '/../src/Lib/' . str_replace('\\', '/', $relativeClass) . '.php';
 
-    // Include the file when it exists to keep the autoloader quiet otherwise.
     if (is_file($path)) {
         require_once $path;
     }

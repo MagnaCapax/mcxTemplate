@@ -1,9 +1,8 @@
 <?php
 declare(strict_types=1);
 
-namespace Tests\Lib\Common;
+namespace Tests\Unit\Common;
 
-use Lib\Common\System;
 use PHPUnit\Framework\TestCase;
 
 // CommonHelpersTest validates the legacy CommonHelpers facade stays predictable for callers.
@@ -304,21 +303,21 @@ final class CommonHelpersTest extends TestCase
     {
         $escapedLevel = preg_quote($level, '/');
         $escapedMessage = preg_quote($message, '/');
-        return sprintf('/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z \\[%s\\] %s$/', $escapedLevel, $escapedMessage);
+        return sprintf('/^\\[%s\\] %s$/', $escapedLevel, $escapedMessage);
     }
 
     // invokeCommonHelpersInIsolatedProcess centralises the boilerplate for spawning isolated PHP runs.
     private function invokeCommonHelpersInIsolatedProcess(string $invocation): array
     {
-        $script = sprintf(
-            'require_once %s; require_once %s; %s',
-            var_export($this->getBootstrapPath(), true),
-            var_export($this->getCommonHelpersPath(), true),
-            $invocation
-        );
+        $bootstrap = var_export($this->getBootstrapPath(), true);
+        $helpers = var_export($this->getCommonHelpersPath(), true);
+        $script = sprintf('require_once %s; require_once %s; %s', $bootstrap, $helpers, $invocation);
 
-        $output = System::capture([PHP_BINARY, '-d', 'display_errors=0', '-r', $script], $status);
-        return [$output, $status];
+        $command = sprintf('%s -d display_errors=0 -r %s 2>&1', escapeshellarg(PHP_BINARY), escapeshellarg($script));
+        $outputLines = [];
+        exec($command, $outputLines, $status);
+
+        return [trim(implode("\n", $outputLines)), $status];
     }
 
     // getBootstrapPath resolves the shared bootstrap loader for isolated interpreter execution.

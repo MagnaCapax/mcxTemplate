@@ -14,8 +14,8 @@ crafting new templates.
   system, and compress the result on the local machine.
 * `templateAssemble.php` – Stage a remote system into a local workspace,
   bundle the templating engine, and package the combination as a template.
-* `packageLiveSystem.php` – Compatibility wrapper that forwards to
-  `templateAssemble.php` so long-standing automation keeps working.
+* `check-template.php` – Audit a template directory or tarball and flag missing
+  distro assets before deployment.
 * `lib/packageCommon.php` – Internal helper library shared by the tooling. You
   rarely invoke it directly, but all scripts depend on its checks and
   path-handling helpers.

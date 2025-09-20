@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-namespace Tests\Lib\Common;
+namespace Tests\Unit\Common;
 
 use Lib\Common\System;
 use PHPUnit\Framework\TestCase;

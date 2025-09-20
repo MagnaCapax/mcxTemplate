@@ -1,0 +1,2 @@
+# Site-specific override hooks executed by configure.sh
+/distros/**/user.d/

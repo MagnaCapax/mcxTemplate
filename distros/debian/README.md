@@ -1,42 +1,35 @@
-# Debian Hook Overview
+# Debian Tasks
 
-The Debian hooks standardise the final provisioning steps after a filesystem is
-cloned into place. The logic mirrors the historical `cloneLiveSystem.sh`
-workflow so Bookworm and future releases boot with the expected layout.
+Debian provisioning runs through the ordered task scripts stored in
+`common/tasks/`. Each script handles a specific responsibility so the flow stays
+simple and easy to audit.
 
-## Shared Implementation
+## Task Breakdown
 
-- `common/pre_install.sh` resets SSH host keys, clears the machine-id, and wipes
-  stale resume configuration before packages are touched.
-- `common/post_install.sh` rebuilds `/etc/fstab`, hostname data, static
-  networking, and bootloader configuration using the known NVMe-first layout.
-  The fstab content itself comes from `../../common/write_fstab.php` so other
-  distros can reuse the same PHP helper.
-- Shared helpers live in `../../lib/common/` and provide logging plus root
-  validation routines.
+1. `10-reset-system-identifiers.sh` – Removes SSH host keys, resets
+   `/etc/machine-id`, and cleans stale resume configuration copied from the
+   template image.
+2. `20-configure-identity.sh` – Derives the hostname, updates `/etc/hostname`
+   and `/etc/hosts`, and renders `/etc/network/interfaces` using the shared PHP
+   helpers.
+3. `30-configure-storage.sh` – Regenerates `/etc/fstab` and records mdadm array
+   metadata when mdadm is available inside the chroot.
+4. `40-update-boot.sh` – Refreshes initramfs images, rebuilds `grub.cfg`, and
+   reinstalls GRUB onto the configured boot devices.
 
-Each version directory can replace either script when Debian changes defaults,
-but should otherwise delegate back to the common implementation to avoid drift.
+Tasks execute alphabetically, so adding a new step simply requires choosing an
+unused numeric prefix.
 
-## Environment Overrides
+## Version Overrides
 
-The post-install hook accepts simple overrides so lab systems can tweak the
-layout without editing the script:
+When a release needs custom behaviour, create `distros/debian/<version>/tasks/`
+and drop the altered scripts there. The orchestrator runs the common tasks
+first, then executes the version-specific overrides if the directory exists.
+For now Debian uses only the shared `common` tasks.
 
-| Variable | Purpose |
-| --- | --- |
-| `HOSTNAME_DOMAIN` | Domain appended to the detected hostname. |
-| `ROOT_DEVICE` | Device path mounted as `/`. |
-| `HOME_DEVICE` | Device path mounted as `/home`. |
-| `BOOT_DEVICE` | Device path mounted as `/boot`. |
-| `SWAP_DEVICE` | Device path registered as swap. |
-| `GRUB_TARGETS` | Space-separated device list passed to `grub-install`. |
+## User Overrides
 
-Keep overrides minimal so the shared defaults remain a reliable baseline.
-
-## Version Directories
-
-Directories such as `11/` (Debian Bullseye), `12/` (Debian Bookworm), and
-`13/` (Debian Trixie) wrap the shared scripts. When a release diverges, copy
-only the lines that changed into the new versioned hook and leave the rest in
-`common/`.
+Place site-specific shell or PHP scripts inside `common/user.d/` (or the
+version-specific equivalent). Files in these directories are ignored by Git but
+will run after the built-in tasks, allowing last-minute tweaks without forking
+upstream code.

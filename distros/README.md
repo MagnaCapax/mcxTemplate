@@ -1,24 +1,32 @@
 # Distribution Hooks
 
-The `distros/` tree stores provisioning hooks that run inside the
-`mcxTemplate` chroot. Each distro keeps its lifecycle scripts alongside any
-supporting notes so the behaviour stays predictable across releases.
+The `distros/` tree stores provisioning hooks that run inside the mcxTemplate
+chroot. Each distro keeps its task scripts alongside documentation so behaviour
+stays predictable across releases.
 
 ## Layout Overview
 
-- `distros/common/` keeps cross-distro assets such as the PHP fstab writer.
-- `lib/common/` holds shared shell helpers such as logging and root checks.
-- `<distro>/common/` contains the default hook implementations for a distro.
-- `<distro>/<version>/` overrides any hook that changed for a specific release
-  while keeping documentation that is unique to that version.
+- `configure.php` detects the active distro/version and executes tasks in order.
+- `<distro>/common/tasks/` holds the default task list for the distro.
+- `<distro>/<version>/tasks/` contains overrides when a release diverges.
+- `user.d/` directories at each level allow site-specific PHP hooks that are
+  ignored by Git but executed after the built-in tasks.
+- `../common/` keeps reusable helpers (for example the PHP hostname writers).
+
+Tasks are named with a numeric prefix (`10-`, `20-`, …) so alphabetical sorting
+matches the desired execution order. Tasks are implemented in PHP so they can
+reuse the shared helper library shipped in `distros/common/lib` without
+introducing additional interpreters.
+
+## Adding a New Distro
+
+1. Create `distros/<distro>/common/tasks/` and populate ordered scripts.
+2. Add optional `distros/<distro>/<version>/tasks/` when a release diverges from
+   the shared defaults.
+3. Drop any local overrides into `user.d/` while keeping them out of version
+   control.
+4. Document the flow in a `README.md` inside the distro directory so future
+   contributors understand the expectations.
 
 This layered layout keeps common logic in one place and only forks code when a
-release genuinely needs different behaviour. New distros should follow the same
-pattern: place reusable code in `common/` and let versioned directories provide
-small wrappers or overrides.
-
-## Naming Convention
-
-Version directories use the numeric major version (for example `12`) to reduce
-renames between testing and release builds. READMEs should mention the matching
-codename (such as “bookworm”) so both references stay clear to operators.
+release genuinely needs different behaviour.

@@ -12,6 +12,12 @@ final class Common
         fwrite(STDOUT, '[INFO] ' . $message . PHP_EOL);
     }
 
+    // Provide a middle ground logging level for non-fatal warnings.
+    public static function logWarn(string $message): void
+    {
+        fwrite(STDERR, '[WARN] ' . $message . PHP_EOL);
+    }
+
     // Emit clear error messages that stand out from normal output.
     public static function logError(string $message): void
     {
@@ -54,6 +60,50 @@ final class Common
         return is_string($result) && trim($result) !== '';
     }
 
+    // Execute a command when present while logging a warning if it is missing.
+    public static function runIfCommandExists(string $command, array $arguments = []): bool
+    {
+        if (!self::commandExists($command)) {
+            self::logWarn('Skipped ' . $command . ' because it is not installed.');
+            return false;
+        }
+
+        $escapedArguments = array_map('escapeshellarg', $arguments);
+        $commandLine = escapeshellarg($command);
+        if ($escapedArguments !== []) {
+            $commandLine .= ' ' . implode(' ', $escapedArguments);
+        }
+        // Assemble the command line explicitly to avoid shell injection issues.
+
+        $descriptorSpec = [
+            0 => STDIN,
+            1 => STDOUT,
+            2 => STDERR,
+        ];
+        // Pass through standard streams so callers inherit command output.
+
+        $process = proc_open($commandLine, $descriptorSpec, $pipes);
+        if (!is_resource($process)) {
+            self::logWarn('Failed to launch ' . $command . '.');
+            return false;
+        }
+
+        foreach ($pipes as $pipe) {
+            if (is_resource($pipe)) {
+                fclose($pipe);
+            }
+        }
+        // Close pipes early to avoid descriptor leaks across repeated calls.
+
+        $status = proc_close($process);
+        if ($status !== 0) {
+            self::logWarn($command . ' exited with status ' . (string) $status . '.');
+            return false;
+        }
+
+        return true;
+    }
+
     // Reuse a single wrapper for command execution across scripts.
     public static function runCommand(array $command, ?int &$status = null): string
     {
@@ -63,6 +113,60 @@ final class Common
         exec($commandLine, $outputLines, $exitCode);
         $status = $exitCode;
         return trim(implode("\n", $outputLines));
+    }
+
+    // Launch a PHP helper script and optionally treat failures as fatal errors.
+    public static function runPhpScript(string $path, bool $failOnError = true): bool
+    {
+        if (!is_file($path)) {
+            $message = 'Helper missing at ' . $path . '.';
+            if ($failOnError) {
+                self::fail($message);
+            } else {
+                self::logWarn($message);
+                return false;
+            }
+        }
+
+        $command = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($path);
+        // Use the current PHP binary so nested calls mirror the parent process.
+
+        $descriptorSpec = [
+            0 => STDIN,
+            1 => STDOUT,
+            2 => STDERR,
+        ];
+        // Keep all standard I/O wired through for seamless logging behaviour.
+
+        $process = proc_open($command, $descriptorSpec, $pipes, dirname($path));
+        if (!is_resource($process)) {
+            if ($failOnError) {
+                self::fail('Failed to launch helper ' . basename($path) . '.');
+            } else {
+                self::logWarn('Failed to launch helper ' . basename($path) . '.');
+                return false;
+            }
+        }
+
+        foreach ($pipes as $pipe) {
+            if (is_resource($pipe)) {
+                fclose($pipe);
+            }
+        }
+        // Ensure descriptors close even when helpers run for extended periods.
+
+        $status = proc_close($process);
+        if ($status !== 0) {
+            $message = 'Helper ' . basename($path) . ' exited with status ' . (string) $status . '.';
+            if ($failOnError) {
+                self::fail($message);
+            } else {
+                self::logWarn($message);
+                return false;
+            }
+        }
+
+        return true;
     }
 
     // Validate hostnames against a conservative RFC 1123 inspired pattern.

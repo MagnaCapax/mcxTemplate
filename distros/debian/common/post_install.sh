@@ -78,46 +78,36 @@ configure_mdadm() {
   fi
 }
 
-# write_hostname_files updates /etc/hostname and /etc/hosts entries.
+# write_hostname_files delegates to a PHP helper for templating the files.
 write_hostname_files() {
   local short_hostname="$1"
   local fqdn="${short_hostname}.${HOSTNAME_DOMAIN}"
-  log_info "Setting hostname to ${fqdn}."
-  printf '%s\n' "${fqdn}" > /etc/hostname
-  local host_ip="${IP_ADDRESS:-127.0.1.1}"
-  cat <<EOF_HOSTS > /etc/hosts
-127.0.0.1       localhost
-${host_ip}    ${short_hostname} ${fqdn}
-
-# The following lines are desirable for IPv6 capable hosts
-::1     localhost ip6-localhost ip6-loopback
-ff02::1 ip6-allnodes
-ff02::2 ip6-allrouters
-EOF_HOSTS
+  local host_writer="${DISTRO_COMMON_DIR}/write_hostname_files.php"
+  # Confirm the helper exists before attempting to execute it.
+  if [[ ! -x "${host_writer}" ]]; then
+    log_error "Hostname writer missing at ${host_writer}."
+    exit 1
+  fi
+  log_info "Setting hostname to ${fqdn} via PHP helper."
+  SHORT_HOSTNAME="${short_hostname}" \
+    FQDN="${fqdn}" \
+    HOST_IP="${IP_ADDRESS:-127.0.1.1}" \
+    "${host_writer}"
 }
 
-# write_interfaces builds a simple static /etc/network/interfaces template.
+# write_interfaces hands control to PHP so the template remains consistent.
 write_interfaces() {
   local cidr_value="${NETWORK_CIDR:-192.0.2.10/24}"
-  log_info "Writing /etc/network/interfaces with primary address ${cidr_value}."
-  cat <<EOF_INTERFACES > /etc/network/interfaces
-# This file describes the network interfaces available on your system
-# and how to activate them. For more information, see interfaces(5).
-
-source /etc/network/interfaces.d/*
-
-# The loopback network interface
-auto lo
-iface lo inet loopback
-
-# The primary network interface
-auto eth0
-iface eth0 inet static
-    address ${cidr_value}
-EOF_INTERFACES
-  if [[ -n "${GATEWAY:-}" ]]; then
-    printf '    gateway %s\n' "${GATEWAY}" >> /etc/network/interfaces
+  local interface_writer="${DISTRO_COMMON_DIR}/write_interfaces.php"
+  # Abort if the helper script is missing to avoid partial updates.
+  if [[ ! -x "${interface_writer}" ]]; then
+    log_error "Interface writer missing at ${interface_writer}."
+    exit 1
   fi
+  log_info "Writing /etc/network/interfaces with primary address ${cidr_value} via PHP helper."
+  NETWORK_CIDR="${cidr_value}" \
+    GATEWAY="${GATEWAY:-}" \
+    "${interface_writer}"
 }
 
 # update_boot_components refreshes initramfs, grub.cfg, and bootloaders.

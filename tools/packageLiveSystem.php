@@ -59,7 +59,7 @@ function parseArguments(array $argv): array
         'sourceHost' => '',
         'sourceUser' => 'root',
         'outputPath' => '',
-        'templatePath' => realpath(__DIR__ . '/../common') ?: '',
+        'templatePath' => realpath(__DIR__ . '/../src') ?: '',
         'extras' => [],
     ];
 

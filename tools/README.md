@@ -52,7 +52,7 @@ The resulting tarball contains three top-level directories:
 
 * `rootfs/` – A faithful copy of the remote file system (excluding runtime
   mounts such as `/proc` or `/sys`).
-* `template/` – A copy of the repository `common/` templating engine.
+* `template/` – A copy of the repository `src/` templating engine.
 * `extras/` – Optional files supplied through `--extra`. The directory is
   omitted when no additional assets are provided.
 

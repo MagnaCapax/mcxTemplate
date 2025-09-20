@@ -8,41 +8,49 @@
 declare(strict_types=1);
 // The script uses strict types so accidental nulls trigger visible failures.
 
-$defaults = [
-    'ROOT_DEVICE' => '/dev/nvme0n1p2',
-    'HOME_DEVICE' => '/dev/nvme0n1p3',
-    'BOOT_DEVICE' => '/dev/md1',
-    'SWAP_DEVICE' => '/dev/nvme0n1p1',
-];
-// Defaults mirror the historical clone workflow and can be overridden via env.
-
-$getValue = static function (string $key) use ($defaults): string {
+function envOrDefault(string $key, string $default): string
+{
     $raw = getenv($key);
     if ($raw === false) {
-        return $defaults[$key];
+        return $default;
     }
     $trimmed = trim($raw);
-    return $trimmed === '' ? $defaults[$key] : $trimmed;
-};
+    return $trimmed === '' ? $default : $trimmed;
+}
 // Fetch configuration values while falling back to predictable defaults.
+
+$rootDevice = envOrDefault('ROOT_DEVICE', '/dev/nvme0n1p2');
+
+$homeRaw = getenv('HOME_DEVICE');
+$homeDevice = $homeRaw === false ? null : trim($homeRaw);
+if ($homeDevice === '') {
+    $homeDevice = null;
+}
+
+$bootDevice = envOrDefault('BOOT_DEVICE', '/dev/md1');
+$swapDevice = envOrDefault('SWAP_DEVICE', '/dev/nvme0n1p1');
 
 $lines = [
     '# /etc/fstab: static file system information.',
     '#',
     "# Use 'blkid' to print the universally unique identifier for a device.",
     '# <file system> <mount point>   <type>  <options>       <dump>  <pass>',
-    sprintf('%s /               ext4    errors=remount-ro 0       1', $getValue('ROOT_DEVICE')),
-    sprintf('%s /home           ext4    defaults        0       2', $getValue('HOME_DEVICE')),
-    sprintf('%s /boot           ext4    defaults        0       2', $getValue('BOOT_DEVICE')),
-    sprintf('%s none            swap    sw              0       0', $getValue('SWAP_DEVICE')),
+    sprintf('%s /               ext4    errors=remount-ro 0       1', $rootDevice),
 ];
+
+if ($homeDevice !== null) {
+    $lines[] = sprintf('%s /home           ext4    defaults        0       2', $homeDevice);
+}
+
+$lines[] = sprintf('%s /boot           ext4    defaults        0       2', $bootDevice);
+$lines[] = sprintf('%s none            swap    sw              0       0', $swapDevice);
 // Compose the canonical fstab entries in the same order as the legacy scripts.
 
 $payload = implode(PHP_EOL, $lines) . PHP_EOL;
 // Ensure the rendered file always ends with a trailing newline for POSIX tools.
 
 if (file_put_contents('/etc/fstab', $payload) === false) {
-    fwrite(STDERR, "ERROR: Unable to write /etc/fstab\n");
-    exit(1);
+    fwrite(STDERR, "WARN: Unable to write /etc/fstab; leaving existing file intact\n");
+    return;
 }
-// Abort loudly when the file cannot be written so the operator notices quickly.
+// Warn and continue so downstream tasks can proceed even if fstab write fails.

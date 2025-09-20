@@ -20,6 +20,9 @@ $repoRoot = dirname($scriptDir);
 require $scriptDir . '/common/lib/Common.php';
 // Load the helper definitions exactly once before any logic executes.
 
+require_once $scriptDir . '/common/lib/OsRelease.php';
+// Pull in detectDistro() so both runtime and tests share one implementation.
+
 Common::ensureRoot();
 // Abort immediately if the orchestrator does not run with root privileges.
 
@@ -53,50 +56,7 @@ $distroId = trim((string) (getenv('MCX_DISTRO_ID') ?: ($args[0] ?? '')));
 $distroVersion = trim((string) (getenv('MCX_DISTRO_VERSION') ?: ($args[1] ?? '')));
 // Allow explicit overrides via environment variables or positional arguments.
 
-/**
- * Detect distro information from /etc/os-release when overrides are missing.
- */
-function detectDistro(string $currentId, string $currentVersion): array
-{
-    $distroId = $currentId;
-    $distroVersion = $currentVersion;
-    // Start with the supplied identifiers and fill in any missing pieces.
-
-    if ($distroId !== '' && $distroVersion !== '') {
-        return [$distroId, $distroVersion];
-        // Short-circuit when both values were explicitly provided by caller.
-    }
-
-    $osRelease = '/etc/os-release';
-    if (!is_file($osRelease)) {
-        return [$distroId, $distroVersion];
-        // Leave detection untouched if the metadata file is absent entirely.
-    }
-
-    $data = @parse_ini_file($osRelease);
-    if ($data === false) {
-        return [$distroId, $distroVersion];
-        // Fail softly so the operator can fall back to manual overrides later.
-    }
-
-    if ($distroId === '' && isset($data['ID'])) {
-        $distroId = trim((string) $data['ID']);
-        // Mirror the behaviour of the historical Bash helper for ID values.
-    }
-
-    if ($distroVersion === '' && isset($data['VERSION_ID'])) {
-        $distroVersion = trim((string) $data['VERSION_ID']);
-        // Prefer VERSION_ID so we align with numeric release identifiers.
-    }
-
-    if ($distroVersion === '' && isset($data['VERSION_CODENAME'])) {
-        $distroVersion = trim((string) $data['VERSION_CODENAME']);
-        // Fall back to VERSION_CODENAME when numeric identifiers are missing.
-    }
-
-    return [$distroId, $distroVersion];
-}
-
+// Default argument keeps compatibility by still reading /etc/os-release.
 [$distroId, $distroVersion] = detectDistro($distroId, $distroVersion);
 // Populate missing fields by inspecting the local os-release metadata.
 

@@ -20,9 +20,6 @@ $repoRoot = dirname($scriptDir);
 require $scriptDir . '/common/lib/Common.php';
 // Load the helper definitions exactly once before any logic executes.
 
-Common::ensureRoot();
-// Abort immediately if the orchestrator does not run with root privileges.
-
 putenv('MCX_TEMPLATE_ROOT=' . $repoRoot);
 $_ENV['MCX_TEMPLATE_ROOT'] = $repoRoot;
 // Share the repository root with every downstream task via environment vars.
@@ -143,6 +140,9 @@ if ($distroId !== '') {
 if ($distroVersion !== '') {
     setEnvironmentValue('MCX_DISTRO_VERSION', $distroVersion);
 }
+
+Common::ensureRoot();
+// Enforce root privileges once we know we actually need to run tasks.
 
 $hostnameOption = trim((string) ($cliOptions['hostname'] ?? ''));
 if ($hostnameOption !== '') {

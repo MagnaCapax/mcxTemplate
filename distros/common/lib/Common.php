@@ -174,4 +174,32 @@ final class Common
         }
         return (bool) preg_match('/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$/', $candidate);
     }
+
+    // Recursively empty directory contents without deleting the root.
+    public static function emptyDirectory(string $directory): void
+    {
+        if (!is_dir($directory) || is_link($directory)) {
+            return;
+        }
+
+        $handle = @opendir($directory);
+        if ($handle === false) {
+            return;
+        }
+
+        while (false !== ($entry = readdir($handle))) {
+            if ($entry === '.' || $entry === '..') {
+                continue;
+            }
+            $path = $directory . DIRECTORY_SEPARATOR . $entry;
+            if (is_dir($path) && !is_link($path)) {
+                self::emptyDirectory($path);
+                @rmdir($path);
+            } else {
+                @unlink($path);
+            }
+        }
+
+        closedir($handle);
+    }
 }

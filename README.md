@@ -42,12 +42,7 @@ operations inside the final system.
   required.
 - `distros/common/` – Shared PHP helpers for rendering config files across all
   distros.
-<<<<<<< HEAD
-- `src/Common/Lib/` – Shared PHP helpers leveraged outside distro-specific code.
-- `src/Lib/Common/` – Shared shell-interfacing PHP helpers (`Logging.php`, `System.php`).
-=======
 - `lib/common/` – Shared PHP helpers (`Logging.php`, `System.php`).
->>>>>>> b089dec (Debian template configuration update, splitting and getting further along towards testable case)
 - `tools/` – Packaging helpers for building template tarballs.
 
 ## configure.php Options
@@ -68,6 +63,9 @@ template. The most common options are:
   `/root/.ssh/authorized_keys`.
 - `--post-config=<uri>` – Fetch and execute a post-configuration script after
   the template finishes its built-in tasks.
+
+The script only requires root once it begins executing tasks; informational
+actions like `--help` can be run without elevated privileges.
 
 Example usage from mcxRescue:
 

@@ -87,8 +87,9 @@ scripts keep functioning.
 
 ## Running Tests
 
-Run the PHP unit tests after installing dependencies with Composer:
+Run the PHPUnit suite after installing dependencies with Composer:
 
-```
+```bash
+composer install
 vendor/bin/phpunit --configuration tests/phpunit.xml.dist
 ```

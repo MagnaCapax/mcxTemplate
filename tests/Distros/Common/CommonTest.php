@@ -7,50 +7,49 @@ use Distros\Common\Common;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
-// Bootstrap already wires the Common helper for the suite, so no extra require.
+// Ensure the shared helper is loaded even when Composer autoloading is absent.
+require_once dirname(__DIR__, 3) . '/distros/common/lib/Common.php';
 
-// Verify the shared Common helpers behave predictably.
+// CommonTest exercises the distro helper API so provisioning scripts stay stable.
 final class CommonTest extends TestCase
 {
-    // Provide the echo command fixture with a helpful label.
+    // Confirm runCommand returns stdout output without trailing whitespace.
     public function testRunCommandReturnsOutput(): void
     {
-        $status = null; // Capture the exit code returned by the helper.
+        $status = null; // Capture the exit code produced by the helper.
         $output = Common::runCommand([PHP_BINARY, '-r', 'echo "probe";'], $status);
 
-        // Ensure the output and exit status mirror the executed command.
+        // Validate both the captured output and propagated status code.
         self::assertSame('probe', $output);
         self::assertSame(0, $status);
     }
 
-    // Confirm failing commands bubble their exit statuses back to callers.
+    // Confirm runCommand propagates exit codes from failing commands.
     public function testRunCommandPropagatesExitStatus(): void
     {
-        $status = null; // Track the exit status for the failing probe.
+        $status = null; // Track the failing command's exit status.
         $output = Common::runCommand([PHP_BINARY, '-r', 'fwrite(STDERR, "nope"); exit(7);'], $status);
 
-        // The helper trims stdout and leaves stderr untouched for failures.
+        // Failing commands should surface an empty string with the exit code intact.
         self::assertSame('', $output);
         self::assertSame(7, $status);
     }
 
-    // Supply passing hostname candidates for the validation helper.
+    // Validate hostnames that should pass the conservative pattern.
     #[DataProvider('validHostnameProvider')]
     public function testIsValidHostnameAcceptsExpectedValues(string $candidate): void
     {
-        // Acceptable hostnames should evaluate to true.
-        self::assertTrue(Common::isValidHostname($candidate));
+        self::assertTrue(Common::isValidHostname($candidate)); // Accept good inputs.
     }
 
-    // Supply failing hostname candidates to guarantee rejections.
+    // Validate hostnames that should fail the conservative pattern.
     #[DataProvider('invalidHostnameProvider')]
     public function testIsValidHostnameRejectsUnexpectedValues(string $candidate): void
     {
-        // Invalid hostnames should evaluate to false.
-        self::assertFalse(Common::isValidHostname($candidate));
+        self::assertFalse(Common::isValidHostname($candidate)); // Reject bad inputs.
     }
 
-    // Provide representative hostnames that align with RFC 1123 expectations.
+    // Provide representative hostname values that align with RFC 1123 guidance.
     public static function validHostnameProvider(): array
     {
         return [
@@ -58,18 +57,18 @@ final class CommonTest extends TestCase
             'numeric host' => ['n1'],
             'multi label' => ['alpha.beta.gamma'],
             'with hyphen' => ['rack-22'],
-            'trailing label max length' => ['a' . str_repeat('b', 61) . 'c'],
+            'long label' => ['a' . str_repeat('b', 61) . 'c'],
         ];
     }
 
-    // Provide hostnames that violate the conservative validation pattern.
+    // Provide values that violate length or character constraints.
     public static function invalidHostnameProvider(): array
     {
         return [
             'empty string' => [''],
             'leading hyphen' => ['-rack'],
             'trailing hyphen' => ['rack-'],
-            'exceeds label length' => [str_repeat('a', 64)],
+            'too long' => [str_repeat('a', 64)],
             'invalid character' => ['rack_01'],
         ];
     }

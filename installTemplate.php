@@ -20,11 +20,19 @@ Common::ensureRoot();
 $configureScript = __DIR__ . '/distros/configure.php';
 // Path to the PHP orchestrator that coordinates distro provisioning tasks.
 
+$forwardArgs = $argv;
+array_shift($forwardArgs);
+// Pass through CLI arguments supplied by mcxRescue so configure.php sees them.
+
 Common::logInfo('Launching distros/configure.php from installTemplate.php.');
 // Emit a breadcrumb so logs show where the provisioning hand-off happens.
 
-Common::runPhpScript($configureScript);
-// Delegate execution to the shared PHP helper that handles task orchestration.
+$success = Common::runPhpScript($configureScript, $forwardArgs, false);
+// Delegate execution to the shared PHP helper while forwarding the arguments.
+
+if (!$success) {
+    Common::logWarn('distros/configure.php reported a failure; review logs for details.');
+}
 
 Common::logInfo('Distro configuration completed via installTemplate.php.');
 // Provide a clear marker that the provisioning stage reached completion.

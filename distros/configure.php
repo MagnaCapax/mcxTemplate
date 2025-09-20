@@ -32,26 +32,165 @@ $_ENV['MCX_TEMPLATE_ROOT'] = $repoRoot;
  */
 function showUsage(): void
 {
-    echo "Usage: configure.php [DISTRO [VERSION]]" . PHP_EOL;
+    echo "Usage: configure.php [OPTIONS] [DISTRO [VERSION]]" . PHP_EOL;
     echo PHP_EOL;
-    echo "Without arguments the script inspects /etc/os-release to detect" . PHP_EOL;
-    echo "the active distro and major version. Set MCX_DISTRO_ID and" . PHP_EOL;
-    echo "MCX_DISTRO_VERSION to override detection when necessary." . PHP_EOL;
+    echo "Base options:" . PHP_EOL;
+    echo "  --distro=ID                Override distro detection." . PHP_EOL;
+    echo "  --version=MAJOR            Override version detection." . PHP_EOL;
+    echo PHP_EOL;
+    echo "Networking & identity:" . PHP_EOL;
+    echo "  --hostname=FQDN            Set the fully-qualified hostname." . PHP_EOL;
+    echo "  --host-ip=IP               Explicit host IP for /etc/hosts." . PHP_EOL;
+    echo "  --network-cidr=CIDR        Primary interface CIDR block." . PHP_EOL;
+    echo "  --gateway=IP               Default gateway address." . PHP_EOL;
+    echo PHP_EOL;
+    echo "Storage:" . PHP_EOL;
+    echo "  --root-device=PATH         Device to mount at /." . PHP_EOL;
+    echo "  --home-device=PATH|omit    Device for /home or omit to skip." . PHP_EOL;
+    echo PHP_EOL;
+    echo "Post provisioning:" . PHP_EOL;
+    echo "  --ssh-keys-uri=URI         Fetch authorized_keys from URI." . PHP_EOL;
+    echo "  --post-config=URI          Download and execute post script." . PHP_EOL;
+    echo PHP_EOL;
+    echo "Without options the script inspects /etc/os-release to detect" . PHP_EOL;
+    echo "the active distro and version. Environment variables" . PHP_EOL;
+    echo "MCX_DISTRO_ID and MCX_DISTRO_VERSION provide the same overrides." . PHP_EOL;
+}
+
+/**
+ * Split argv into recognised long options and positional arguments.
+ */
+function parseArguments(array $arguments): array
+{
+    $options = [];
+    $positionals = [];
+    $known = [
+        'distro',
+        'version',
+        'hostname',
+        'host-ip',
+        'network-cidr',
+        'gateway',
+        'post-config',
+        'ssh-keys-uri',
+        'root-device',
+        'home-device',
+    ];
+
+    while ($arguments !== []) {
+        $current = array_shift($arguments);
+
+        if ($current === '--help' || $current === '-h') {
+            showUsage();
+            exit(0);
+        }
+
+        if ($current === '--') {
+            $positionals = array_merge($positionals, $arguments);
+            break;
+        }
+
+        if (strncmp($current, '--', 2) !== 0) {
+            $positionals[] = $current;
+            continue;
+        }
+
+        $eqPos = strpos($current, '=');
+        if ($eqPos !== false) {
+            $name = substr($current, 2, $eqPos - 2);
+            $value = substr($current, $eqPos + 1);
+        } else {
+            $name = substr($current, 2);
+            if ($arguments !== [] && strncmp((string) $arguments[0], '--', 2) !== 0) {
+                $value = array_shift($arguments);
+            } else {
+                $value = '';
+            }
+        }
+
+        if (!in_array($name, $known, true)) {
+            Common::logWarn("Ignoring unknown option --{$name}.");
+            continue;
+        }
+
+        $options[$name] = $value;
+    }
+
+    return [$options, $positionals];
+}
+
+function setEnvironmentValue(string $key, string $value): void
+{
+    putenv($key . '=' . $value);
+    $_ENV[$key] = $value;
 }
 
 $args = $argv;
 array_shift($args);
 // Remove the script name from the argument list for easier handling.
 
-if (($args[0] ?? '') === '--help' || ($args[0] ?? '') === '-h') {
-    showUsage();
-    exit(0);
-}
-// Honor help requests so operators can see invocation options quickly.
+[$cliOptions, $args] = parseArguments($args);
+// Separate CLI options from positional distro arguments.
 
-$distroId = trim((string) (getenv('MCX_DISTRO_ID') ?: ($args[0] ?? '')));
-$distroVersion = trim((string) (getenv('MCX_DISTRO_VERSION') ?: ($args[1] ?? '')));
-// Allow explicit overrides via environment variables or positional arguments.
+$distroId = trim((string) ($cliOptions['distro'] ?? (getenv('MCX_DISTRO_ID') ?: ($args[0] ?? ''))));
+$distroVersion = trim((string) ($cliOptions['version'] ?? (getenv('MCX_DISTRO_VERSION') ?: ($args[1] ?? ''))));
+// Allow explicit overrides via command-line options, environment variables, or positionals.
+
+if ($distroId !== '') {
+    setEnvironmentValue('MCX_DISTRO_ID', $distroId);
+}
+
+if ($distroVersion !== '') {
+    setEnvironmentValue('MCX_DISTRO_VERSION', $distroVersion);
+}
+
+$hostnameOption = trim((string) ($cliOptions['hostname'] ?? ''));
+if ($hostnameOption !== '') {
+    setEnvironmentValue('MCX_FQDN', $hostnameOption);
+    $short = explode('.', $hostnameOption)[0] ?? $hostnameOption;
+    $short = trim((string) $short);
+    if ($short === '') {
+        Common::logWarn('Ignoring empty hostname override.');
+    } else {
+        setEnvironmentValue('MCX_SHORT_HOSTNAME', $short);
+    }
+
+    $dotPos = strpos($hostnameOption, '.');
+    if ($dotPos !== false) {
+        $domain = substr($hostnameOption, $dotPos + 1);
+        if ($domain !== false && trim($domain) !== '') {
+            setEnvironmentValue('MCX_HOSTNAME_DOMAIN', trim($domain));
+        }
+    }
+}
+
+$optionEnvMap = [
+    'host-ip' => 'MCX_HOST_IP',
+    'network-cidr' => 'MCX_NETWORK_CIDR',
+    'gateway' => 'MCX_GATEWAY',
+    'post-config' => 'MCX_POST_CONFIG_URI',
+    'ssh-keys-uri' => 'MCX_SSH_KEYS_URI',
+    'root-device' => 'ROOT_DEVICE',
+    'home-device' => 'HOME_DEVICE',
+];
+
+foreach ($optionEnvMap as $option => $envName) {
+    if (array_key_exists($option, $cliOptions)) {
+        $value = trim((string) $cliOptions[$option]);
+        if ($option === 'home-device' && strcasecmp($value, 'omit') === 0) {
+            putenv($envName);
+            unset($_ENV[$envName]);
+            continue;
+        }
+
+        if ($value === '') {
+            Common::logWarn('Ignoring empty value for --' . $option . '.');
+            continue;
+        }
+
+        setEnvironmentValue($envName, $value);
+    }
+}
 
 /**
  * Detect distro information from /etc/os-release when overrides are missing.

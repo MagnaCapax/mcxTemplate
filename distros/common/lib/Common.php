@@ -116,19 +116,19 @@ final class Common
     }
 
     // Launch a PHP helper script and optionally treat failures as fatal errors.
-    public static function runPhpScript(string $path, bool $failOnError = true): bool
+    public static function runPhpScript(string $path, array $args = [], bool $failOnError = true): bool
     {
         if (!is_file($path)) {
             $message = 'Helper missing at ' . $path . '.';
-            if ($failOnError) {
-                self::fail($message);
-            } else {
-                self::logWarn($message);
-                return false;
-            }
+            self::logWarn($message);
+            return false;
         }
 
-        $command = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($path);
+        $commandParts = [escapeshellarg(PHP_BINARY), escapeshellarg($path)];
+        foreach ($args as $argument) {
+            $commandParts[] = escapeshellarg((string) $argument);
+        }
+        $command = implode(' ', $commandParts);
         // Use the current PHP binary so nested calls mirror the parent process.
 
         $descriptorSpec = [
@@ -140,12 +140,9 @@ final class Common
 
         $process = proc_open($command, $descriptorSpec, $pipes, dirname($path));
         if (!is_resource($process)) {
-            if ($failOnError) {
-                self::fail('Failed to launch helper ' . basename($path) . '.');
-            } else {
-                self::logWarn('Failed to launch helper ' . basename($path) . '.');
-                return false;
-            }
+            $message = 'Failed to launch helper ' . basename($path) . '.';
+            self::logWarn($message);
+            return false;
         }
 
         foreach ($pipes as $pipe) {
@@ -159,11 +156,11 @@ final class Common
         if ($status !== 0) {
             $message = 'Helper ' . basename($path) . ' exited with status ' . (string) $status . '.';
             if ($failOnError) {
-                self::fail($message);
-            } else {
                 self::logWarn($message);
                 return false;
             }
+            self::logWarn($message);
+            return false;
         }
 
         return true;

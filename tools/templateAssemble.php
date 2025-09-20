@@ -2,29 +2,18 @@
 <?php
 declare(strict_types=1);
 
-// packageLiveSystem.php remains for compatibility so existing tooling keeps working.
-// The wrapper forwards execution to the maintained template assembler entry point.
+// templateAssemble.php captures a live system into a staging directory.
+// The script keeps sourcing, copying, and packaging responsibilities clear.
 
-// Ensure help banners show the compatibility script name when invoked directly.
-$_SERVER['argv'][0] = __FILE__;
+ini_set('display_errors', 'stderr');
 
-<<<<<<< ours
-// Constant exclude list keeps runtime mounts out of the archived rootfs.
-const RUNTIME_EXCLUDES = [
-    '/dev/*',
-    '/proc/*',
-    '/sys/*',
-    '/tmp/*',
-    '/run/*',
-    '/mnt/*',
-    '/media/*',
-    '/lost+found',
-];
+require_once __DIR__ . '/lib/packageCommon.php';
 
 // printUsage renders a short help message for operators running the tool.
 function printUsage(): void
 {
-    $script = basename(__FILE__);
+    // Use the invoked script name so wrappers stay in sync with the help text.
+    $script = basename($_SERVER['argv'][0] ?? __FILE__);
     echo "Usage: {$script} --source-host <host> [options]\n";
     echo "\n";
     echo "Options:\n";
@@ -33,23 +22,8 @@ function printUsage(): void
     echo "  --output <file>        Target tar.gz file path.\n";
     echo "  --template <path>      Local templating engine directory.\n";
     echo "  --extra <path>         Extra local file or directory to embed.\n";
+    echo "  --ssh-option <option>  Extra ssh(1) option forwarded to rsync.\n";
     echo "  --help                 Show this message and exit.\n";
-}
-
-// fail prints an error message and exits with status code one.
-function fail(string $message): void
-{
-    fwrite(STDERR, $message . "\n");
-    exit(1);
-}
-
-// ensureBinary confirms an executable is reachable in PATH.
-function ensureBinary(string $binary): void
-{
-    $result = trim((string) shell_exec('command -v ' . escapeshellarg($binary)));
-    if ($result === '') {
-        fail("Required command '{$binary}' not found in PATH.");
-    }
 }
 
 // parseArguments converts CLI switches into a predictable config array.
@@ -60,8 +34,9 @@ function parseArguments(array $argv): array
         'sourceHost' => '',
         'sourceUser' => 'root',
         'outputPath' => '',
-        'templatePath' => realpath(__DIR__ . '/../src') ?: '',
+        'templatePath' => realpath(__DIR__ . '/../common') ?: '',
         'extras' => [],
+        'sshOptions' => [],
     ];
 
     // Walk arguments sequentially to keep parsing simple and transparent.
@@ -88,6 +63,20 @@ function parseArguments(array $argv): array
                     $config['extras'][] = $extra;
                 } else {
                     fwrite(STDERR, "Skipping missing extra path: {$extraInput}\n");
+                }
+                break;
+            case '--ssh-option':
+                $option = $argv[++$i] ?? '';
+                if ($option === '') {
+                    fail('Missing value for --ssh-option.');
+                }
+                // Reuse the shared tokeniser so multi-part options survive.
+                $tokens = tokenizeArgumentString($option);
+                if (count($tokens) === 0) {
+                    fail('Empty --ssh-option value provided.');
+                }
+                foreach ($tokens as $token) {
+                    $config['sshOptions'][] = $token;
                 }
                 break;
             case '--help':
@@ -156,8 +145,7 @@ function finalizeConfig(array $config): array
 
     if ($config['outputPath'] === '') {
         // Use a timestamped filename when the caller does not choose one.
-        $timestamp = date('Ymd-His');
-        $config['outputPath'] = getcwd() . DIRECTORY_SEPARATOR . 'template-' . $config['sourceHost'] . '-' . $timestamp . '.tar.gz';
+        $config['outputPath'] = defaultOutputPath('template', $config['sourceHost']);
     }
 
     $outputDirectory = dirname($config['outputPath']);
@@ -195,17 +183,29 @@ function buildRsyncCommand(array $config, string $target): string
 {
     $parts = ['rsync', '-aAXH', '--numeric-ids'];
 
-    foreach (RUNTIME_EXCLUDES as $pattern) {
+    foreach (PACKAGE_EXCLUDES as $pattern) {
         $parts[] = '--exclude=' . escapeshellarg($pattern);
     }
 
     // Remote root is transferred via SSH using rsync's remote shell syntax.
+    // Remote shell collects ssh options consistently with clone utilities.
+    $parts[] = '-e ' . escapeshellarg(buildRsyncRemoteShell($config['sshOptions']));
     $remote = sprintf('%s@%s:/', $config['sourceUser'], $config['sourceHost']);
     $parts[] = escapeshellarg($remote);
     // Trailing slash keeps rsync copying into the prepared rootfs folder.
     $parts[] = escapeshellarg($target . DIRECTORY_SEPARATOR);
 
     return implode(' ', $parts);
+}
+
+// buildRsyncRemoteShell assembles an ssh command with forwarded options.
+function buildRsyncRemoteShell(array $sshOptions): string
+{
+    $shell = 'ssh';
+    foreach ($sshOptions as $option) {
+        $shell .= ' ' . escapeshellarg($option);
+    }
+    return $shell;
 }
 
 // runCommand executes an external command and stops on failure.
@@ -232,8 +232,8 @@ function copyTemplatingEngine(array $config, string $stagingDir): void
 function copyLocalPath(string $source, string $destination): void
 {
     $cleanSource = rtrim($source, DIRECTORY_SEPARATOR);
-    // rsync preserves permissions and symlinks which template archives expect.
-    $command = sprintf('rsync -a %s %s', escapeshellarg($cleanSource), escapeshellarg($destination));
+    // rsync preserves permissions, ACLs, xattrs, and hard links for parity.
+    $command = sprintf('rsync -aAXH %s %s', escapeshellarg($cleanSource), escapeshellarg($destination));
     runCommand($command);
 }
 
@@ -283,7 +283,3 @@ function main(array $argv): void
 }
 
 main($argv);
-=======
-// Delegate the actual work to the modern implementation without duplicating logic.
-require_once __DIR__ . '/templateAssemble.php';
->>>>>>> theirs

@@ -1,2 +1,4 @@
 # Site-specific override hooks executed by configure.sh
-/distros/**/user.d/
+/distros/**/user.d/*
+# Retain placeholder rules for hook directories while ignoring site overrides
+!/distros/**/user.d/.gitignore

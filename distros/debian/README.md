@@ -5,6 +5,25 @@ lexicographic order so the numeric prefixes define the pipeline. All helpers sha
 `Distros\Common\Common` library which now proxies the reusable `src/Lib/Provisioning` classes,
 keeping logging, structured events, and command execution behaviour identical everywhere.
 
+## Quick Start (Debian First Install)
+
+Use this flow to apply the bundled Debian tasks to a new system.
+
+- Build or obtain a template
+  - Assemble from a live host: `php tools/templateAssemble.php --source-host <host> --source-user root --output /srv/templates/debian-base.tar.gz`
+  - Or from an image: `sudo php tools/templateCloneImage.php --image /path/debian.img --output /srv/templates/debian-base.tar.gz`
+  - Sanity check: `php tools/check-template.php /srv/templates/debian-base.tar.gz`
+- Stage on the target (from the rescue/live system)
+  - Partition/format/mount, then extract the tarball so mcxTemplate resides at `/opt/mcxTemplate` in the new rootfs.
+- Run inside the chroot
+  - Dry run: `php /opt/mcxTemplate/installTemplate.php --hostname=example1.dc.local --network-cidr=192.0.2.10/24 --gateway=192.0.2.1 --mount=/,/dev/nvme0n1p2 --mount=swap,/dev/nvme0n1p3 --log-dir=/var/log/mcxTemplate-test --skip-tasks=26-run-post-config.php --dry-run`
+  - Apply: `php /opt/mcxTemplate/installTemplate.php --hostname=example1.dc.local --network-cidr=192.0.2.10/24 --gateway=192.0.2.1 --mount=/,/dev/nvme0n1p2 --mount=swap,/dev/nvme0n1p3`
+- Review
+  - Logs under `--log-dir` (default `/var/log/mcxTemplate`).
+  - Structured JSON events at `${MCX_STRUCTURED_LOG}`.
+
+Tip: Override the primary interface used by templates via `--primary-interface` or `MCX_PRIMARY_INTERFACE`. Skip any step with `--skip-tasks` (matches filenames with or without `.php`).
+
 ## Task Breakdown
 
 - `05-clear-log-files.php` – Removes Debian log archives so new clones boot without inherited

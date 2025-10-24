@@ -91,21 +91,24 @@ function loadTarEntries(string $tarPath): array
 function checkTemplate(array $entries): array
 {
     $requirements = [];
-    $requirements['distros/configure.php'] = in_array('distros/configure.php', $entries, true);
+    // Support three layouts: engine at top-level, under template/, or embedded
+    // into rootfs/opt/mcxTemplate.
+    $bases = ['', 'template/', 'rootfs/opt/mcxTemplate/'];
+    $requirements['distros/configure.php'] = presentUnderBases($entries, 'distros/configure.php', $bases);
 
     $distroDirs = [];
     foreach ($entries as $entry) {
-        if (preg_match('#^distros/([^/]+)/common/tasks(?:/|$)#', $entry, $match)) {
+        if (preg_match('#^(?:distros|template/distros|rootfs/opt/mcxTemplate/distros)/([^/]+)/common/tasks(?:/|$)#', $entry, $match)) {
             $distroDirs[$match[1]] = true;
         }
     }
 
     foreach ($distroDirs as $distro => $_) {
-        $requirements["distros/{$distro}/templates"] = hasDirectory($entries, "distros/{$distro}/templates");
-        $requirements["distros/{$distro}/common/tasks"] = hasDirectory($entries, "distros/{$distro}/common/tasks");
+        $requirements["distros/{$distro}/templates"] = hasDirectoryUnderBases($entries, "distros/{$distro}/templates", $bases);
+        $requirements["distros/{$distro}/common/tasks"] = hasDirectoryUnderBases($entries, "distros/{$distro}/common/tasks", $bases);
     }
 
-    $requirements['distros/common/templates'] = hasDirectory($entries, 'distros/common/templates');
+    $requirements['distros/common/templates'] = hasDirectoryUnderBases($entries, 'distros/common/templates', $bases);
 
     return $requirements;
 }
@@ -115,6 +118,28 @@ function hasDirectory(array $entries, string $prefix): bool
     $prefix = rtrim($prefix, '/');
     foreach ($entries as $entry) {
         if (strpos($entry, $prefix . '/') === 0 || $entry === $prefix) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function presentUnderBases(array $entries, string $path, array $bases): bool
+{
+    foreach ($bases as $base) {
+        $candidate = ltrim($base . ltrim($path, '/'), '/');
+        if (in_array($candidate, $entries, true)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function hasDirectoryUnderBases(array $entries, string $prefix, array $bases): bool
+{
+    foreach ($bases as $base) {
+        $candidate = ltrim($base . ltrim($prefix, '/'), '/');
+        if (hasDirectory($entries, $candidate)) {
             return true;
         }
     }

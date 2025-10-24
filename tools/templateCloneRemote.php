@@ -6,12 +6,13 @@ declare(strict_types=1);
 // The flow mirrors cloneLiveSystem.sh but keeps orchestration inside PHP.
 
 require_once __DIR__ . '/lib/packageCommon.php';
+require_once __DIR__ . '/lib/rehydration.php';
 
 // printUsage describes the positional arguments and optional SSH flags.
 function printUsage(): void
 {
     $script = basename(__FILE__);
-    echo "Usage: {$script} <user@host> <output|-> [--ssh-option <option>]... [--force]\\n";
+    echo "Usage: {$script} <user@host> <output|-> [--ssh-option <option>]... [--force] [--rehydrate] [--template <path>] [--embed-into-rootfs|--no-embed-into-rootfs] [--embed-force]\\n";
     echo "\n";
     echo "Arguments:\n";
     echo "  <user@host>   Remote SSH endpoint providing the root filesystem.\n";
@@ -20,6 +21,11 @@ function printUsage(): void
     echo "Options:\n";
     echo "  --ssh-option <option>  Extra ssh(1) option, may repeat.\n";
     echo "  --force               Overwrite an existing output file.\n";
+    echo "  --rehydrate           Build a rehydrated archive (rootfs/ + engine) in one shot.\n";
+    echo "  --template <path>     Engine directory to embed (defaults to repo root).\n";
+    echo "  --embed-into-rootfs   Embed engine into rootfs/opt/mcxTemplate (default).\n";
+    echo "  --no-embed-into-rootfs Place engine under template/ instead of rootfs.\n";
+    echo "  --embed-force         Overwrite existing rootfs/opt/mcxTemplate if present.\n";
     echo "  --help                 Show this help message.\n";
 }
 
@@ -31,6 +37,11 @@ function parseArguments(array $argv): array
         'output' => '',
         'sshOptions' => [],
         'force' => false,
+        // Rehydration options
+        'rehydrate' => false,
+        'templatePath' => realpath(dirname(__DIR__)) ?: '',
+        'embedIntoRootfs' => true,
+        'embedForce' => false,
     ];
 
     $positionals = [];
@@ -55,6 +66,27 @@ function parseArguments(array $argv): array
         // Allow forced overwrite when rerunning against the same target.
         if ($arg === '--force') {
             $config['force'] = true;
+            continue;
+        }
+
+        if ($arg === '--rehydrate') {
+            $config['rehydrate'] = true;
+            continue;
+        }
+        if ($arg === '--template') {
+            $config['templatePath'] = realpath($argv[++$i] ?? '') ?: '';
+            continue;
+        }
+        if ($arg === '--embed-into-rootfs') {
+            $config['embedIntoRootfs'] = true;
+            continue;
+        }
+        if ($arg === '--no-embed-into-rootfs') {
+            $config['embedIntoRootfs'] = false;
+            continue;
+        }
+        if ($arg === '--embed-force') {
+            $config['embedForce'] = true;
             continue;
         }
 
@@ -181,20 +213,87 @@ function streamArchive(array $config): array
     return $destination;
 }
 
+/**
+ * Stream the remote archive into a specific file path.
+ *
+ * @param array $config Parsed CLI config.
+ * @param string $path Absolute path to write the streamed archive.
+ * @return void
+ */
+function streamArchiveToPath(array $config, string $path): void
+{
+    $command = buildSshCommand($config['remote'], $config['sshOptions']);
+    $remoteScript = buildRemoteScript();
+
+    $descriptors = [
+        0 => ['pipe', 'w'],
+        1 => ['file', $path, 'w'],
+        2 => ['file', 'php://stderr', 'w'],
+    ];
+
+    $process = proc_open($command, $descriptors, $pipes);
+    if (!is_resource($process)) {
+        fail('Unable to start ssh process.');
+    }
+
+    fwrite($pipes[0], $remoteScript);
+    fclose($pipes[0]);
+
+    $exitCode = proc_close($process);
+    if ($exitCode !== 0) {
+        fail("Streaming failed with exit code {$exitCode}.");
+    }
+}
+
 // main validates requirements, performs streaming, and reports status.
 function main(array $argv): void
 {
     ensureBinary('ssh');
 
     $config = parseArguments($argv);
-    $destination = streamArchive($config);
+    
+    if ($config['rehydrate']) {
+        // Validate tools for rehydration workflow.
+        ensureBinary('tar');
+        ensureBinary('pigz');
+        if ($config['templatePath'] === '') {
+            fail('Template path not found for rehydration.');
+        }
 
+        // Resolve the final output destination now (handles --force for files).
+        $destination = resolveOutput($config['output'], $config['force']);
+
+        // Stream remote archive into a temporary file before rehydration.
+        $tmp = tempnam(sys_get_temp_dir(), 'mcxClone-');
+        if ($tmp === false) {
+            fail('Unable to create temporary file for remote archive.');
+        }
+        streamArchiveToPath($config, $tmp);
+
+        // Rehydrate into the requested destination, then clean up.
+        try {
+            $out = $destination['isStdout'] ? 'php://stdout' : $destination['target'];
+            rehydrate_archive($tmp, $config['templatePath'], $out, $config['embedIntoRootfs'], $config['embedForce']);
+        } finally {
+            @unlink($tmp);
+        }
+
+        $message = 'Rehydrated archive created';
+        if ($destination['isStdout']) {
+            fwrite(STDERR, $message . " (STDOUT).\n");
+            return;
+        }
+        echo $message . ' at ' . $destination['label'] . "\n";
+        return;
+    }
+
+    // Raw streaming behaviour (backward compatible):
+    $destination = streamArchive($config);
     $message = 'Archive stream completed';
     if ($destination['isStdout']) {
         fwrite(STDERR, $message . " (STDOUT).\n");
         return;
     }
-
     echo $message . ' at ' . $destination['label'] . "\n";
 }
 

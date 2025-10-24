@@ -13,7 +13,7 @@ crafting new templates.
 * `templateCloneImage.php` – Mount a disk image read-only, copy its root file
   system, and compress the result on the local machine.
 * `templateAssemble.php` – Stage a remote system into a local workspace,
-  bundle the templating engine, and package the combination as a template.
+  bundle the templating engine (rehydration), and package the combination as a template.
 * `check-template.php` – Audit a template directory or tarball and flag missing
   distro assets before deployment.
 * `lib/packageCommon.php` – Internal helper library shared by the tooling. You
@@ -42,6 +42,10 @@ remote host to create a tarball, compresses it with `pigz` when available
 (falling back to `gzip`), and writes the archive locally without staging a full
 copy.
 
+Optionally, pass `--rehydrate` to immediately produce a combined archive that includes
+`rootfs/` plus the mcxTemplate engine (embedded by default under `rootfs/opt/mcxTemplate`).
+This uses the shared rehydration library to keep behaviour consistent with other tools.
+
 ### Dependencies
 
 * `php`
@@ -53,12 +57,20 @@ copy.
 
 ```bash
 php tools/templateCloneRemote.php <user@host> <output|-> [--ssh-option <option>]... [--force]
+php tools/templateCloneRemote.php <user@host> <output|-> --rehydrate [--template <path>] [--embed-into-rootfs|--no-embed-into-rootfs] [--embed-force] [--ssh-option <option>]... [--force]
 ```
 
 ### Usage
 
 ```bash
-php tools/templateCloneRemote.php root@mcx-node-01.example.com /srv/templates/mcx-node-01.tar.gz
+# Raw remote stream (rootfs only):
+php tools/templateCloneRemote.php root@mcx-node-01.example.com /srv/templates/mcx-node-01-rootfs.tar.gz
+
+# One-shot rehydration (rootfs + embedded engine):
+php tools/templateCloneRemote.php root@mcx-node-01.example.com /srv/templates/mcx-node-01.tar.gz --rehydrate --ssh-option "-p 2222"
+
+# Rehydrate with engine staged under template/ instead of rootfs/opt/mcxTemplate:
+php tools/templateCloneRemote.php root@mcx-node-01.example.com /srv/templates/mcx-node-01.tar.gz --rehydrate --no-embed-into-rootfs
 ```
 
 * Pass `-` (or `stdout`) as the second argument to stream the archive to
@@ -107,9 +119,13 @@ sudo php tools/templateCloneImage.php --image /srv/images/base.img \
 ## templateAssemble.php
 
 `templateAssemble.php` connects to a live Linux system over SSH, copies the root
-file system into a temporary staging area, adds the repository templating
-engine, optionally includes extra local files (ISO images, QCOW2 disks, custom
-scripts, etc.), and finally produces a `pigz`-compressed tarball. The PHP
+file system into a temporary staging area, rehydrates the template by adding the
+mcxTemplate provisioning engine, optionally includes extra local files (ISO images, QCOW2 disks, custom
+scripts, etc.), and finally produces a `pigz`-compressed tarball. By default, the
+engine is embedded into `rootfs/opt/mcxTemplate` (skipping if one already exists
+in the captured rootfs unless `--embed-force` is provided). When
+`--no-embed-into-rootfs` is set, the engine is placed under `template/` instead.
+The PHP
 implementation keeps the workflow layered:
 
 1. **Source acquisition** – fetches the distro via rsync/SSH.
@@ -132,7 +148,7 @@ permission to read the entire file system tree.
 ### Synopsis
 
 ```bash
-php tools/templateAssemble.php --source-host <host> --source-user <user> [options]
+php tools/templateAssemble.php --source-host <host> --source-user <user> [--embed-into-rootfs|--no-embed-into-rootfs] [--embed-force] [--template <path>] [--output <path>] [--ssh-option <opt>]...
 ```
 
 ### Usage
@@ -156,9 +172,9 @@ file with the host name sanitised to filesystem-friendly characters.
 
 The resulting tarball contains three top-level directories:
 
-* `rootfs/` – A faithful copy of the remote file system (excluding runtime
-  mounts such as `/proc` or `/sys`).
-* `template/` – A copy of the repository `src/` templating engine.
+* `rootfs/` – A faithful copy of the remote file system (excluding runtime mounts such as `/proc` or `/sys`).
+* `opt/mcxTemplate` inside `rootfs/` – The provisioning engine when `--embed-into-rootfs` is in effect (default). Skips if already present unless `--embed-force` is used.
+* `template/` – The provisioning engine when `--no-embed-into-rootfs` is used (manual copy to `/opt/mcxTemplate` after extraction).
 * `extras/` – Optional files supplied through `--extra`. The directory is
   omitted when no additional assets are provided.
 
@@ -173,3 +189,24 @@ The resulting tarball contains three top-level directories:
   path and automatically removed on exit.
 * For large systems ensure the local machine has sufficient disk space to store
   the uncompressed staging directory during packaging.
+
+## Rehydration (Bundle mcxTemplate into a Captured System)
+
+Rehydration refers to embedding the mcxTemplate provisioning engine into the template so
+the target has `/opt/mcxTemplate` available after extraction.
+
+- Recommended (single step): use `templateAssemble.php`
+  - Defaults bundle the repository into `template/` in the archive.
+  - Usage:
+    - `php tools/templateAssemble.php --source-host root@host --output /srv/templates/host.tar.gz`
+    - Optionally override which directory is bundled with `--template <path>` (defaults to repo root).
+  - Default behaviour embeds into `rootfs/opt/mcxTemplate`; use `--no-embed-into-rootfs` to place under `template/` instead. After extraction on the target, copy `template/` to `/opt/mcxTemplate`.
+
+- Alternative (raw stream + manual rehydration): use `templateCloneRemote.php`
+  - One-shot: `--rehydrate` builds a ready-to-use archive (rootfs + engine) in a single command.
+  - Manual: stream remote rootfs: `php tools/templateCloneRemote.php root@host /srv/templates/rootfs.tar.gz` then rehydrate locally:
+    - Extract `rootfs.tar.gz` into a staging `rootfs/` directory.
+    - Create a sibling `template/` directory and copy this repository into it (or pass a curated subset).
+    - Repackage both as a combined archive containing `rootfs/` and `template/` for downstream use.
+
+Validation: `tools/check-template.php` recognises archives that include the engine at top level or under `template/`.

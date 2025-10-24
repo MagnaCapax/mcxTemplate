@@ -5,6 +5,31 @@ metal systems from live images. The repository keeps the configuration that runs
 inside the target chroot after mcxRescue prepares disks and copies a template
 filesystem into place.
 
+## Quick Start (Debian)
+
+This is a minimal, human-friendly first-run guide using the included Debian tasks and templates.
+
+- Build or obtain a template tarball
+  - From a live host: `php tools/templateAssemble.php --source-host <host> --source-user root --output /srv/templates/debian-base.tar.gz`
+  - From a disk image: `sudo php tools/templateCloneImage.php --image /path/debian.img --output /srv/templates/debian-base.tar.gz`
+  - Validate contents: `php tools/check-template.php /srv/templates/debian-base.tar.gz`
+- Prepare target in rescue environment
+  - Partition, format, and mount the target root (outside mcxTemplate scope).
+  - Extract the archive into the target root.
+    - If built with `tools/templateAssemble.php` defaults, the engine is already embedded under `rootfs/opt/mcxTemplate`, so extraction is sufficient.
+    - If you used `--no-embed-into-rootfs` or a raw stream via `templateCloneRemote.php`, copy the engine into `/opt/mcxTemplate` manually (e.g., from the `template/` directory in the archive).
+- Run the installer inside the chroot (dry run first)
+  - Dry run: `php /opt/mcxTemplate/installTemplate.php --hostname=example1.dc.local --network-cidr=192.0.2.10/24 --gateway=192.0.2.1 --mount=/,/dev/nvme0n1p2 --mount=swap,/dev/nvme0n1p3 --log-dir=/var/log/mcxTemplate-test --skip-tasks=26-run-post-config.php --dry-run`
+  - Apply: `php /opt/mcxTemplate/installTemplate.php --hostname=example1.dc.local --network-cidr=192.0.2.10/24 --gateway=192.0.2.1 --mount=/,/dev/nvme0n1p2 --mount=swap,/dev/nvme0n1p3`
+- Review logs and structured output
+  - Per-task logs: `/var/log/mcxTemplate` (or the path passed via `--log-dir`).
+  - Structured JSON: `${MCX_STRUCTURED_LOG}`; reference with `--log-dir` if unset.
+
+Notes
+- Debian sample tasks are already included under `distros/debian/common/tasks/` and cover log cleanup, ID resets, hostname/network rendering, fstab generation, mdadm capture, and boot updates.
+- You can skip tasks non-destructively via `--skip-tasks` or `MCX_SKIP_TASKS` (names match task filenames, with or without `.php`).
+
+
 ## Provisioning Architecture
 
 mcxTemplate assumes the provisioning host follows the mcxRescue workflow:

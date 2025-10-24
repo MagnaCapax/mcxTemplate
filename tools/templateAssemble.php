@@ -8,6 +8,7 @@ declare(strict_types=1);
 ini_set('display_errors', 'stderr');
 
 require_once __DIR__ . '/lib/packageCommon.php';
+require_once __DIR__ . '/lib/rehydration.php';
 
 // printUsage renders a short help message for operators running the tool.
 function printUsage(): void
@@ -20,7 +21,10 @@ function printUsage(): void
     echo "  --source-host <host>   Hostname or IP for the SSH source.\n";
     echo "  --source-user <user>   SSH user. Defaults to root.\n";
     echo "  --output <file>        Target tar.gz file path.\n";
-    echo "  --template <path>      Local templating engine directory.\n";
+    echo "  --template <path>      Local templating engine directory (defaults to repo root).\n";
+    echo "  --embed-into-rootfs    Embed engine into rootfs/opt/mcxTemplate (default).\n";
+    echo "  --no-embed-into-rootfs Package engine under template/ instead of rootfs.\n";
+    echo "  --embed-force          Overwrite existing rootfs/opt/mcxTemplate if present.\n";
     echo "  --extra <path>         Extra local file or directory to embed.\n";
     echo "  --ssh-option <option>  Extra ssh(1) option forwarded to rsync.\n";
     echo "  --help                 Show this message and exit.\n";
@@ -34,9 +38,22 @@ function parseArguments(array $argv): array
         'sourceHost' => '',
         'sourceUser' => 'root',
         'outputPath' => '',
-        'templatePath' => realpath(__DIR__ . '/../common') ?: '',
+        // Default to the repository root so the full provisioning engine
+        // (installTemplate.php, distros/, src/, etc.) is bundled.
+        // This keeps rehydration simple: extract template/ to /opt/mcxTemplate.
+        'templatePath' => realpath(dirname(__DIR__)) ?: '',
         'extras' => [],
         'sshOptions' => [],
+        // Embedding policy:
+        // - By default, we embed into rootfs/opt/mcxTemplate so the target already
+        //   contains the engine on extraction (no manual copy step required).
+        // - If --no-embed-into-rootfs is supplied, we fall back to writing the
+        //   engine under a sibling template/ directory in the archive.
+        // - When embedding, if /opt/mcxTemplate already exists in the captured
+        //   rootfs we SKIP by default to avoid clobbering; use --embed-force to
+        //   overwrite it in the staging area.
+        'embedIntoRootfs' => true,
+        'embedForce' => false,
     ];
 
     // Walk arguments sequentially to keep parsing simple and transparent.
@@ -55,6 +72,15 @@ function parseArguments(array $argv): array
             case '--template':
                 // Always resolve template path to an absolute directory.
                 $config['templatePath'] = realpath($argv[++$i] ?? '') ?: '';
+                break;
+            case '--embed-into-rootfs':
+                $config['embedIntoRootfs'] = true;
+                break;
+            case '--no-embed-into-rootfs':
+                $config['embedIntoRootfs'] = false;
+                break;
+            case '--embed-force':
+                $config['embedForce'] = true;
                 break;
             case '--extra':
                 $extraInput = $argv[++$i] ?? '';
@@ -217,17 +243,6 @@ function runCommand(string $command): void
     }
 }
 
-// copyTemplatingEngine mirrors the templating engine into staging.
-function copyTemplatingEngine(array $config, string $stagingDir): void
-{
-    $destination = $stagingDir . DIRECTORY_SEPARATOR . 'template';
-    if (!mkdir($destination, 0755) && !is_dir($destination)) {
-        fail('Unable to create template staging directory.');
-    }
-
-    copyLocalPath($config['templatePath'], $destination);
-}
-
 // copyLocalPath reuses rsync for consistent attribute handling.
 function copyLocalPath(string $source, string $destination): void
 {
@@ -277,7 +292,9 @@ function main(array $argv): void
     $config = finalizeConfig($config);
     $stagingDir = createStagingDirectory();
     fetchSource($config, $stagingDir);
-    copyTemplatingEngine($config, $stagingDir);
+    // Embed by default; copy to template/ only when explicitly requested via
+    // --no-embed-into-rootfs. Uses shared rehydration helper for consistency.
+    rehydrate_staging($config['templatePath'], $stagingDir, $config['embedIntoRootfs'], $config['embedForce']);
     copyExtras($config, $stagingDir);
     createArchive($config, $stagingDir);
 }

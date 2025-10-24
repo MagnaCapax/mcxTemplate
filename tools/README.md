@@ -209,4 +209,66 @@ the target has `/opt/mcxTemplate` available after extraction.
     - Create a sibling `template/` directory and copy this repository into it (or pass a curated subset).
     - Repackage both as a combined archive containing `rootfs/` and `template/` for downstream use.
 
-Validation: `tools/check-template.php` recognises archives that include the engine at top level or under `template/`.
+Validation: `tools/check-template.php` recognises archives that include the engine at top level, embedded under `rootfs/opt/mcxTemplate`, or staged under `template/`.
+
+## templateRehydrate.php
+
+`templateRehydrate.php` turns an existing rootfs tarball into a ready-to-use archive that already
+contains the mcxTemplate engine. It uses the shared rehydration helpers, matching the behaviour of
+`templateAssemble.php` and `templateCloneRemote.php --rehydrate`.
+
+### Synopsis
+
+```bash
+php tools/templateRehydrate.php --rootfs /path/rootfs.tar.gz [--output /path/template.tar.gz|--output -] \
+    [--template /path/to/mcxTemplate] [--embed-into-rootfs|--no-embed-into-rootfs] [--embed-force]
+```
+
+### Usage
+
+```bash
+# File output with embedded engine (default):
+php tools/templateRehydrate.php --rootfs /srv/images/base-rootfs.tar.gz --output /srv/templates/base.tar.gz
+
+# Stream to STDOUT (pipe to storage) while embedding:
+php tools/templateRehydrate.php --rootfs /srv/images/base-rootfs.tar.gz --output - > /srv/templates/base.tar.gz
+
+# Stage engine under template/ instead of embedding into rootfs/opt/mcxTemplate:
+php tools/templateRehydrate.php --rootfs /srv/images/base-rootfs.tar.gz --output /srv/templates/base.tar.gz --no-embed-into-rootfs
+```
+
+Notes
+- `--embed-into-rootfs` is the default; if `/opt/mcxTemplate` already exists in the rootfs it is skipped unless `--embed-force` is provided.
+- The `--template` flag lets you point at a different engine directory if you are not running the tool from this repository.
+
+## Rehydration Pipeline Example
+
+End‑to‑end flow to clone a live system, produce a ready‑to‑install archive, and apply it on a target host.
+
+1) Capture and rehydrate on a build/ops host
+
+- One shot to a file:
+  - `php tools/templateCloneRemote.php root@SOURCE /srv/templates/SOURCE.tar.gz --rehydrate`
+- Or stream to remote storage:
+  - `php tools/templateCloneRemote.php root@SOURCE - --rehydrate | ssh storage "cat > /srv/templates/SOURCE.tar.gz"`
+
+2) Prepare the target (rescue/live environment)
+
+- Partition, format, and mount the target root at `/mnt/target` (and any other filesystems).
+
+3) Extract the archive so that the captured root lands at the target root
+
+- Option A (staging + rsync):
+  - `mkdir -p /mnt/stage`
+  - `tar -xzf /srv/templates/SOURCE.tar.gz -C /mnt/stage`
+  - `rsync -aAXH /mnt/stage/rootfs/ /mnt/target/`
+- Option B (direct with tar strip):
+  - `tar -xzf /srv/templates/SOURCE.tar.gz -C /mnt/target --strip-components=1 rootfs`
+
+With defaults, the engine is embedded at `/mnt/target/opt/mcxTemplate` after extraction.
+
+4) Chroot and configure
+
+- `chroot /mnt/target /usr/bin/env -i HOME=/root PATH=/usr/bin:/usr/sbin:/bin:/sbin bash -c "php /opt/mcxTemplate/installTemplate.php --hostname=example1.dc.local --network-cidr=192.0.2.10/24 --gateway=192.0.2.1 --mount=/,/dev/sda1 --mount=swap,/dev/sda2"`
+
+5) Unmount and reboot into the installed system

@@ -10,10 +10,14 @@ Tests live under `tests/unit/` and follow PSR-4-style namespaces rooted at `Test
   skip-set handling, and MCX_MOUNT_SPEC persistence used by `distros/configure.php`.
 * `Tests\\Unit\\Provisioning\\CommonTemplateTest` exercising template discovery, structured logging,
   and primary interface detection in `Lib\\Provisioning\Common` across a mix of edge cases.
-* `Tests\\Unit\\Tools\\TemplateCloneTest` validating `tools/templateAssemble.php` by staging temporary
-  rootfs/template/extras directories and asserting the tarball layout.
 * `Tests\\Unit\\Tools\\CheckTemplateTest` running `tools/check-template.php` against synthetic directories
   and tarballs to ensure the auditor flags missing distro assets with the expected exit codes.
+* `Tests\\Unit\\Tools\\CheckTemplateEmbeddedLayoutTest` verifies that embedded engine archives
+  (engine under `rootfs/opt/mcxTemplate`) are accepted by the auditor.
+* `Tests\\Unit\\Tools\\RehydrationLibraryTest` covers `tools/lib/rehydration.php` embed/skip/force logic and
+  archive rehydration paths (skipped if `tar`/`pigz`/`rsync` are unavailable).
+* `Tests\\Unit\\Tools\\TemplateRehydrateCliTest` exercises the standalone CLI to build a rehydrated archive
+  from a synthetic rootfs tarball (also gated on tool availability).
 * `Tests\\Unit\\Common\\SystemTest` driving the command helpers through both successful and failing
   scenarios, including exit-code assertions that run in isolated PHP processes so PHPUnit itself does
   not terminate.
@@ -50,3 +54,4 @@ Tests live under `tests/unit/` and follow PSR-4-style namespaces rooted at `Test
 
 * If PHPUnit cannot locate classes, confirm the repository is cloned with its relative directory layout intact so `tests/bootstrap.php` can map the `Lib\\Common` namespace.
 * When commands like `sh`, `env`, `true`, or `false` are missing, install your distribution's POSIX shell package or update the tests to target equivalent binaries available on your platform.
+* See also `docs/tests.md` for methodology, layers, and guidance on adding new tests.

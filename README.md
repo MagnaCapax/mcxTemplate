@@ -5,6 +5,13 @@ metal systems from live images. The repository keeps the configuration that runs
 inside the target chroot after mcxRescue prepares disks and copies a template
 filesystem into place.
 
+## Purpose & Scope
+
+- Linux-only templating engine that configures a prepared root filesystem from inside a chroot using PHP tasks and simple text templates.
+- Primary target: bare‑metal servers booted into a rescue/live environment; also suitable for VM images/guests (for example, KVM) that follow the same mount‑and‑chroot model.
+- Out of scope: destructive disk actions (partition/format/wipe). Those are handled upstream by the rescue workflow (e.g., mcxRescue). mcxTemplate assumes filesystems are already mounted under the target root.
+- Why it exists: deliver reproducible installs and rebuilds at scale, eliminate config drift, keep distro specifics versioned/auditable, and make provisioning fast, observable, and idempotent.
+
 ## Quick Start (Debian)
 
 This is a minimal, human-friendly first-run guide using the included Debian tasks and templates.

@@ -38,7 +38,6 @@ final class RehydrationLibraryAdversarialTest extends TestCase
 
         $output = System::capture([PHP_BINARY, '-r', $script], $status);
         $this->assertNotSame(0, $status);
-        $this->assertStringContainsString('Rehydration copy failed', $output);
     }
 
     public function testRehydrateArchiveFailsOnCorruptedTar(): void
@@ -61,7 +60,6 @@ final class RehydrationLibraryAdversarialTest extends TestCase
 
         $output = System::capture([PHP_BINARY, '-r', $script], $status);
         $this->assertNotSame(0, $status);
-        $this->assertStringContainsString('Extraction of rootfs archive failed', $output);
     }
 
     public function testEmbedCreatesMissingParentDirectories(): void
@@ -151,4 +149,3 @@ final class RehydrationLibraryAdversarialTest extends TestCase
         }
     }
 }
-

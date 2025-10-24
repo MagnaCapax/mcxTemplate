@@ -21,7 +21,9 @@ function rehydrate_copy_local_path(string $source, string $destination): void
     if (!is_dir($destination) && !mkdir($destination, 0755, true)) {
         fail('Unable to create destination for rehydration copy: ' . $destination);
     }
-    $command = sprintf('rsync -aAXH %s %s', escapeshellarg($cleanSource), escapeshellarg($destination));
+    // Use trailing '/.' to copy contents of the source directory into the
+    // destination path rather than nesting the directory itself.
+    $command = sprintf('rsync -aAXH %s %s', escapeshellarg($cleanSource . '/.'), escapeshellarg($destination));
     passthru($command, $status);
     if ($status !== 0) {
         fail('Rehydration copy failed with status ' . (string) $status . '.');
@@ -163,4 +165,3 @@ function rehydrate_remove_directory(string $path): void
     }
     @rmdir($path);
 }
-

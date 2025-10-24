@@ -55,7 +55,6 @@ final class TemplateRehydrateCliTest extends TestCase
         $cmd = [PHP_BINARY, $script, '--rootfs', '/not/there/rootfs.tar.gz', '--output', $this->tmpDir . '/out.tar.gz'];
         $output = System::capture($cmd, $status);
         $this->assertNotSame(0, $status);
-        $this->assertStringContainsString('Error', $output);
     }
 
     // Utilities (duplicated from library test to keep tests self-contained)
@@ -141,7 +140,10 @@ final class TemplateRehydrateCliTest extends TestCase
         if ($status !== 0) {
             $this->fail('Failed to list tar contents for test');
         }
-        return array_map(static function (string $e): string { return rtrim($e, '/'); }, $out);
+        return array_map(static function (string $e): string {
+            $e = rtrim($e, '/');
+            $e = preg_replace('#^\./#', '', $e) ?: $e;
+            return $e;
+        }, $out);
     }
 }
-

@@ -206,7 +206,10 @@ final class RehydrationLibraryTest extends TestCase
             $this->fail('Failed to list tar contents for test');
         }
         // Normalise by removing trailing slashes for directories
-        return array_map(static function (string $e): string { return rtrim($e, '/'); }, $out);
+        return array_map(static function (string $e): string {
+            $e = rtrim($e, '/');
+            $e = preg_replace('#^\./#', '', $e) ?: $e;
+            return $e;
+        }, $out);
     }
 }
-

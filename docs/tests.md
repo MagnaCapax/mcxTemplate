@@ -11,6 +11,7 @@ tests vs. production probes.
 - Deterministic: fixed inputs and temp directories; no reliance on host state.
 - Observable: assert on return codes, file outputs, and structured logs.
 - Idempotent: repeat runs do not require cleanup beyond temp directory removal.
+- Tests act as the primary oracle for component correctness. If a test fails, prefer fixing the component behaviour first instead of weakening or removing the test. When updating a test, confirm the failure accurately signals a genuine issue rather than a brittle or misaligned expectation.
 
 ## Layers
 
@@ -56,4 +57,5 @@ To broaden integration coverage without root:
 - Mirror namespaces: `tests/unit/Provisioning/*` for `src/Lib/Provisioning/*`.
 - Use `sys_get_temp_dir()` for fixtures; clean up in `tearDown()`.
 - Assert on exit codes rather than stdout noise when using `passthru`.
-- Avoid adding external package dependencies; if a dev‑only tool is needed, document and gate tests with `markTestSkipped()` when missing.
+- Avoid adding external package dependencies; if a dev-only tool is needed, document and gate tests with `markTestSkipped()` when missing.
+- When a test appears to be faulty, adjust it only after verifying the component behaviour and intended requirement. Document the reasoning for the test change so future maintainers understand the alignment between test and component goals.

@@ -18,6 +18,18 @@ Tests live under `tests/unit/` and follow PSR-4-style namespaces rooted at `Test
   archive rehydration paths (skipped if `tar`/`pigz`/`rsync` are unavailable).
 * `Tests\\Unit\\Tools\\TemplateRehydrateCliTest` exercises the standalone CLI to build a rehydrated archive
   from a synthetic rootfs tarball (also gated on tool availability).
+* `Tests\\Unit\\Tools\\TemplateAssembleAdversarialTest`, `TemplateCloneRemoteAdversarialTest`, and
+  `TemplateCloneImageAdversarialTest` stress CLI argument parsing and environment edge cases for the capture tools
+  without touching real hosts or images.
+* `Tests\\Unit\\Tools\\TemplateRehydrateCliAdversarialTest`, `CheckTemplateAdversarialTest`, and
+  `AnalyzeStructuredLogAdversarialTest` cover failure scenarios for rehydration, auditing, and structured log
+  summarisation utilities.
+* `Tests\\Unit\\Tools\\TemplateCloneRemoteHermeticTest` and `TemplateAssembleHermeticTest` use synthetic ssh/rsync
+  shims and generated archives to verify the happy-path behaviour of capture tools in a hermetic environment.
+* `Tests\\Unit\\Tools\\AnalyzeStructuredLogTest` and `TemplateCloneImageParseTest` provide basic positive-path
+  coverage for the structured log analyzer and image clone argument parser.
+* `Tests\\Unit\\Tools\\TemplateCloneRemoteHermeticTest` and `TemplateAssembleHermeticTest` use synthetic ssh/rsync
+  shims and generated archives to verify the happy-path behaviour of capture tools in a hermetic environment.
 * `Tests\\Unit\\Common\\SystemTest` driving the command helpers through both successful and failing
   scenarios, including exit-code assertions that run in isolated PHP processes so PHPUnit itself does
   not terminate.

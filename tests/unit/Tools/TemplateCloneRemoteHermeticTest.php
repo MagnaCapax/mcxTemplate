@@ -82,6 +82,34 @@ SH);
         $this->assertFileDoesNotExist($outputPath);
     }
 
+    public function testRehydrateSuccessCreatesEmbeddedArchive(): void
+    {
+        // --rehydrate should embed the supplied engine into rootfs/opt/mcxTemplate within the resulting archive.
+        $rootfsTar = $this->createCompressedTar(['etc/fstab' => "# fake\n"]);
+        $engineDir = $this->mkTempDir('mcx-engine-');
+        file_put_contents($engineDir . '/installTemplate.php', 'engine');
+        mkdir($engineDir . '/distros', 0755, true);
+        file_put_contents($engineDir . '/distros/configure.php', 'config');
+
+        $outputPath = $this->generateTempFilePath('clone-rehydrate');
+
+        $result = $this->runTool(
+            'tools/templateCloneRemote.php',
+            ['fake@host', $outputPath, '--rehydrate', '--template', $engineDir],
+            [
+                'PATH' => $this->fakeBinDir . PATH_SEPARATOR . getenv('PATH'),
+                'MCX_FAKE_SSH_MODE' => 'success',
+                'MCX_FAKE_SSH_TAR' => $rootfsTar,
+            ]
+        );
+
+        $this->assertSame(0, $result['status'], 'Rehydrate mode should succeed: ' . $result['output']);
+        $this->assertFileExists($outputPath);
+        $entries = $this->listTarEntries($outputPath);
+        $this->assertContains('rootfs/etc/fstab', $entries);
+        $this->assertContains('rootfs/opt/mcxTemplate/installTemplate.php', $entries);
+    }
+
     private function createCompressedTar(array $files): string
     {
         $sourceDir = $this->mkTempDir('fake-rootfs-');

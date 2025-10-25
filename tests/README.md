@@ -28,6 +28,10 @@ Tests live under `tests/unit/` and follow PSR-4-style namespaces rooted at `Test
   shims and generated archives to verify the happy-path behaviour of capture tools in a hermetic environment.
 * `Tests\\Unit\\Tools\\AnalyzeStructuredLogTest` and `TemplateCloneImageParseTest` provide basic positive-path
   coverage for the structured log analyzer and image clone argument parser.
+* `Tests\\Unit\\Tools\\TemplateRehydrateCliSuccessTest` and `CheckTemplateSuccessTest` ensure the rehydration CLI
+  and template auditor succeed with minimal but valid inputs.
+* `Tests\\Unit\\Provisioning\\ConfigureDryRunTest` runs `distros/configure.php --dry-run` with a synthetic
+  environment (posix_geteuid disabled, USER=root) to verify the high-level orchestration path completes without error.
 * `Tests\\Unit\\Tools\\TemplateCloneRemoteHermeticTest` and `TemplateAssembleHermeticTest` use synthetic ssh/rsync
   shims and generated archives to verify the happy-path behaviour of capture tools in a hermetic environment.
 * `Tests\\Unit\\Common\\SystemTest` driving the command helpers through both successful and failing

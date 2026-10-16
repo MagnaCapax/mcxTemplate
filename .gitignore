@@ -2,3 +2,5 @@
 /distros/**/user.d/*
 # Retain placeholder rules for hook directories while ignoring site overrides
 !/distros/**/user.d/.gitignore
+# Local Codex workspace files
+.codex/

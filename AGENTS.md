@@ -1,5 +1,7 @@
 # Repository Guidelines
 
+Start with [`development/`](development/README.md): the [engineering principles](development/engineering-principles.md) explain the organisation-wide rules below with their reasons and the mistakes that taught them, and [ADR-0001](docs/adr/0001-architecture-layout-and-languages.md) records this repository's layout and languages.
+
 ## Project Context
 - **Purpose**: mcxTemplate operates as a templating engine for distro installations; align automation choices with provisioning workflows suitable for that environment.
 - **Shared Library First**: Prefer reusing the PHP helpers in `src/Common/Lib/Common.php` and `src/Lib/Common/` before writing new logic.
@@ -13,7 +15,15 @@
 - **Predictable Provisioning Flow**: Scripts should follow a deliberate sequence—detect environment, gather inputs, prepare resources, execute actions, and report status—mirroring the clone-and-configure workflow in the reference tooling. Make every transition between steps explicit.
 - **Change Justification**: Only make modifications when there is a clear, documented reason. Do not alter stable, long-lived behavior without evidence that change is required.
 - **Commenting Rule**: Maintain comments such that, on average, at least one line of commentary appears for every ten lines of code (Linux Kernel style guidance).
-- **Language Policy**: Default to Bash for automation tasks. Step up to PHP when workflows become lengthy or complex, keeping the logic centralized. Do **not** introduce Python; if a requirement appears to demand it, escalate instead of adding a Python dependency.
+- **Language Policy**: PHP for anything that parses data, branches, keeps state or calls an API; shell only as thin glue (a cron line, an exec wrapper, a few lines that start the real program). Do **not** introduce Python; if a requirement appears to demand it, escalate instead of adding a Python dependency. The reasons are in `development/engineering-principles.md`, principle 1.
+- **Delete First**: Question the requirement, delete the part, simplify, then speed up, then automate. A needed but broken part is debugged, not deleted.
+- **Pit of Success**: The safe path is the default; risky, destructive or debug-only paths need an explicit, visible opt-in (see Safety First below).
+- **Never Break Old Users**: Keep flags, environment variables, task file names and file formats working. Find every caller before changing one; coordinate new flags with mcxRescue.
+- **Tests That Can Fail**: Every change comes with tests, and a test must be able to fail: break the code once and see it caught. Run `bash tools/run-tests.sh` with PHPUnit installed and read its result; without PHPUnit it skips the unit tests and still exits 0.
+- **Files Around 150 Lines**: A target, not a hard limit. Split a file that grows past it or starts doing two jobs, when you are changing it anyway.
+- **Naming**: camelCase for variables, functions, classes and new code files, read from the broadest context to the most specific (subject, event, unit). Task files keep the `NN-name.php` pattern because the prefix sets the order (ADR-0001).
+- **Decision Records**: Accepted ADRs in `docs/adr/` are binding: follow them or supersede them with a new ADR, never work around them. A significant behaviour, interface, security or workflow change ships with an ADR (template `docs/adr/0000-template.md`, one subject per ADR).
+- **Review Before Commit**: Review the change with the [review unit](https://github.com/MagnaCapax/mcxPikkumies/tree/main/pikkumies/tools/development/code-review) against these rules and the ADRs. This repository is public: no provider, model or vendor names, credentials or internal data in code, docs, tests or commit messages.
 
 ## Operational Philosophy
 - **Safety First**: Destructive actions (partitioning, formatting, wiping identifiers) must be guarded with clear intent checks, informative logging, and opportunities for dry runs or confirmation steps where practical.

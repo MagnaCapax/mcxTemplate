@@ -1,0 +1,10 @@
+{
+   "blockdevices": [
+      {"name":"loop0","kname":"loop0","type":"loop","size":"453640192","serial":null,"wwn":null,"model":null,"tran":null,"rm":false,"hotplug":false,"pttype":null},
+      {"name":"nvme0n1","kname":"nvme0n1","type":"disk","size":4000787030016,"serial":"NVME-ROOT-1","wwn":"eui.0025385b71b0c0de","model":"BIGNVME","tran":"nvme","rm":false,"hotplug":false,"pttype":"gpt"},
+      {"name":"sda","kname":"sda","type":"disk","size":"31914983424","serial":null,"wwn":null,"model":"Flash_Disk","tran":"usb","rm":"1","hotplug":"1","pttype":"dos"},
+      {"name":"sdb","kname":"sdb","type":"disk","size":"31914983424","serial":"","wwn":null,"model":"Flash_Disk","tran":"usb","rm":"1","hotplug":"1","pttype":null},
+      {"name":"sdc","kname":"sdc","type":"disk","size":"21900000000","serial":null,"wwn":null,"model":"KvmMedia","tran":"usb","rm":"1","hotplug":"1","pttype":null},
+      {"name":"sr0","kname":"sr0","type":"rom","size":"1073741312","serial":null,"wwn":null,"model":"QEMU DVD-ROM","tran":"sata","rm":"1","hotplug":"0","pttype":null}
+   ]
+}

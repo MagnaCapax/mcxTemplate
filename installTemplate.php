@@ -32,6 +32,11 @@ $success = Common::runPhpScript($configureScript, $forwardArgs, false);
 
 if (!$success) {
     Common::logWarn('distros/configure.php reported a failure; review logs for details.');
+    if (in_array('--strict', $forwardArgs, true)) {
+        // Opt-in strict mode: the caller (installNode.php) must see the failure as an exit code.
+        Common::logError('Strict mode: distro configuration failed; not reporting completion.');
+        exit(1);
+    }
 }
 
 Common::logInfo('Distro configuration completed via installTemplate.php.');

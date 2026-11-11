@@ -68,6 +68,7 @@ function showUsage(): void
     echo "  --log-dir=PATH             Directory for per-task log files." . PHP_EOL;
     echo "  --skip-tasks=LIST          Comma/space list of task names to skip." . PHP_EOL;
     echo "  --dry-run                  Print planned tasks without executing them." . PHP_EOL;
+    echo "  --strict                   Exit non-zero and print a failure summary when a task fails." . PHP_EOL;
     echo "  --distro=ID                Override distro detection." . PHP_EOL;
     echo "  --version=MAJOR            Override version detection." . PHP_EOL;
     echo PHP_EOL;
@@ -205,6 +206,13 @@ function setLegacyEnvFromMounts(array $normalizedMounts): void
 $args = $argv;
 array_shift($args);
 // Remove the script name from the argument list for easier handling.
+
+// --strict is opt-in: without it a failed task stays a warning and the run exits 0 as before.
+$strictMode = in_array('--strict', $args, true);
+$args = array_values(array_filter($args, static fn (string $arg): bool => $arg !== '--strict'));
+$GLOBALS['MCX_STRICT'] = $strictMode;
+$GLOBALS['MCX_FAILED_TASKS'] = [];
+// Failed task names are collected here so strict mode can summarise them at the end.
 
 [$cliOptions, $args, $multiOptions, $helpRequested] = parseArguments($args);
 if ($helpRequested) {
@@ -529,6 +537,7 @@ function runTaskScript(string $path): void
             "Failed to launch task {$scriptName}.",
             $contextBase + ['event' => 'launch_failed']
         );
+        $GLOBALS['MCX_FAILED_TASKS'][] = $scriptName . ' (could not be launched)';
         if (is_resource($logHandle)) {
             fclose($logHandle);
         }
@@ -601,6 +610,7 @@ function runTaskScript(string $path): void
             "Task {$scriptName} exited with status {$status}.",
             $finishContext
         );
+        $GLOBALS['MCX_FAILED_TASKS'][] = $scriptName . ' (exit ' . $status . ')';
     } else {
         Common::logInfo(
             sprintf('Task %s completed in %.3fs.', $scriptName, $duration),
@@ -669,5 +679,21 @@ if ($distroVersion !== '') {
     // Provide context for the log stream when only common tasks are available.
 }
 
+if ($strictMode && $GLOBALS['MCX_FAILED_TASKS'] !== []) {
+    // Strict mode: the caller must be able to tell failure from success.
+    Common::logError(
+        'Distro configuration FAILED in strict mode; failed tasks: ' . implode(', ', $GLOBALS['MCX_FAILED_TASKS']),
+        ['event' => 'strict-failure', 'failed_tasks' => $GLOBALS['MCX_FAILED_TASKS']]
+    );
+    exit(1);
+}
+
 Common::logInfo('Distro configuration completed successfully.');
 // Final confirmation so mcxRescue logs show the provisioning stage finished.
+
+if ($strictMode && !$dryRun && $skipTaskSet === []) {
+    // Strict mode proves success positively: installNode.php treats exit 0 WITHOUT this exact line as a
+    // failure (an older engine that ignored --strict, a dry run, or tasks skipped on request).
+    // Keep the text in step with Lib\Install\Installer::CONFIGURE_SENTINEL.
+    fwrite(STDOUT, 'MCXTEMPLATE-STRICT-CONFIGURE-OK' . PHP_EOL);
+}

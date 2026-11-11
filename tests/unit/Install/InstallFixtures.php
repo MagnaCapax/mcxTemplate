@@ -1,0 +1,121 @@
+<?php
+declare(strict_types=1);
+
+namespace Tests\Unit\Install;
+
+use Lib\Install\CommandRunner;
+use Lib\Install\PlanValidator;
+
+// CallbackRunner is a fake CommandRunner whose answers come from a closure, for
+// tests that need an answer to change between two calls (device re-enumeration).
+// It records every command and runs nothing.
+final class CallbackRunner implements CommandRunner
+{
+    /** @var array<int,array<int,string>> */
+    public array $argvs = [];
+    /** @var callable */
+    private $responder;
+
+    public function __construct(callable $responder)
+    {
+        $this->responder = $responder;
+    }
+
+    public function run(array $argv, ?string $stdin = null, array $env = []): array
+    {
+        $this->argvs[] = $argv;
+        return ($this->responder)($argv, count($this->argvs));
+    }
+}
+
+// InstallFixtures builds the disk, state and plan shapes the install core consumes.
+// The default scenario is the 4 TB case: one NVMe, two identical USB sticks with
+// empty serials on different USB ports, and a KvmMedia virtual-media device.
+final class InstallFixtures
+{
+    public const MAC = 'aa:bb:cc:dd:ee:02'; // second port of a dual-port NIC
+
+    /**
+     * @param array<string,mixed> $over
+     * @return array<string,mixed> one DiskInventory record
+     */
+    public static function disk(string $kname, array $over = []): array
+    {
+        return array_merge([
+            'kname' => $kname, 'path' => '/dev/' . $kname, 'sizeBytes' => 4000787030016, 'serial' => 'SER-' . $kname,
+            'wwn' => '', 'model' => 'TESTDISK', 'tran' => 'nvme', 'removable' => false, 'hotplug' => false, 'pttype' => '',
+            'idPath' => 'pci-0000:01:00.0-' . $kname, 'usbVendorId' => '', 'idSerialShort' => '',
+        ], $over);
+    }
+
+    /** @return array<int,array<string,mixed>> */
+    public static function inventory(): array
+    {
+        return [
+            self::disk('nvme0n1', ['serial' => 'NVME-ROOT-1', 'idPath' => 'pci-0000:01:00.0-nvme-1', 'model' => 'BIGNVME']),
+            self::stick('sda', 'pci-0000:00:14.0-usb-0:3:1.0-scsi-0:0:0:0'),
+            self::stick('sdb', 'pci-0000:00:14.0-usb-0:4:1.0-scsi-0:0:0:0'),
+            self::disk('sdc', ['sizeBytes' => 21900000000, 'serial' => '', 'tran' => 'usb', 'usbVendorId' => '3346',
+                'idPath' => 'pci-0000:00:14.0-usb-0:1:1.0-scsi-0:0:0:0', 'model' => 'KvmMedia']),
+        ];
+    }
+
+    /** @return array<string,mixed> */
+    public static function stick(string $kname, string $idPath, array $over = []): array
+    {
+        return self::disk($kname, array_merge(['sizeBytes' => 31914983424, 'serial' => '', 'tran' => 'usb', 'model' => 'Flash_Disk',
+            'idPath' => $idPath, 'usbVendorId' => '058f', 'removable' => true], $over));
+    }
+
+    /** @return array<string,mixed> */
+    public static function state(array $over = []): array
+    {
+        return array_merge(['mounted' => [], 'swapped' => [], 'md' => [], 'dm' => [], 'holders' => [], 'rescueDisk' => '',
+            'partitions' => ['nvme0n1' => ['nvme0n1p1', 'nvme0n1p2'], 'sda' => ['sda1'], 'sdb' => ['sdb1'], 'sdc' => []],
+            'nicMacs' => ['aa:bb:cc:dd:ee:01', self::MAC]], $over);
+    }
+
+    /** @return array<string,mixed> raw (unvalidated) plan for biosNvmeUsbBoot */
+    public static function rawPlan(array $over = []): array
+    {
+        return array_merge([
+            'jobId' => 'job-1', 'nodeId' => 'node-1', 'mac' => 'AA:BB:CC:DD:EE:02', 'expectedIps' => ['192.0.2.10'], 'firmware' => 'bios',
+            'layout' => 'biosNvmeUsbBoot',
+            'disks' => [
+                'root' => ['serial' => 'NVME-ROOT-1', 'wwn' => '', 'sizeBytes' => 4000787030016, 'transport' => 'nvme'],
+                'boot' => [
+                    ['serial' => '', 'usbPath' => 'pci-0000:00:14.0-usb-0:3:1.0-scsi-0:0:0:0', 'sizeBytes' => 31914983424, 'transport' => 'usb', 'model' => 'Flash_Disk'],
+                    ['serial' => '', 'usbPath' => 'pci-0000:00:14.0-usb-0:4:1.0-scsi-0:0:0:0', 'sizeBytes' => 31914983424, 'transport' => 'usb', 'model' => 'Flash_Disk'],
+                ],
+            ],
+            'ignore' => [],
+            'template' => ['name' => 'debian-12-base', 'version' => '20261111', 'sha256' => str_repeat('ab', 32), 'sizeBytes' => 1000,
+                'path' => '/run/mcxTemplate/debian-12-base.tar.gz'],
+            'host' => ['fqdn' => 'node1.example.test', 'cidr' => '192.0.2.10/24', 'gateway' => '192.0.2.1',
+                'resolvers' => ['198.51.100.2', '198.51.100.3']],
+            'token' => 'tok-0123456789abcdef', 'apiBase' => 'https://api.example.test/', 'wipeAuthorized' => true,
+        ], $over);
+    }
+
+    /** @return array<string,mixed> validated plan */
+    public static function plan(array $over = []): array
+    {
+        return PlanValidator::validate(self::rawPlan($over));
+    }
+
+    // inventory without one disk, by kernel name
+    public static function without(string $kname): array
+    {
+        return array_values(array_filter(self::inventory(), static fn (array $d): bool => $d['kname'] !== $kname));
+    }
+
+    // counterUuid returns a deterministic UUID generator for command-list assertions.
+    public static function counterUuid(): callable
+    {
+        $n = 0;
+        return static function () use (&$n): string {
+            $n++;
+            return sprintf('00000000-0000-4000-8000-%012d', $n);
+        };
+    }
+}

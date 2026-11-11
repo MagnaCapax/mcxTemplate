@@ -42,11 +42,20 @@ final class Installer
      * copy. Without it (dry run) the template is verified in place and nothing is
      * written. Throws InstallRefusal with a named code on any problem.
      *
+     * With $fetch (network mode, needs $stage) the template does not exist yet: right after
+     * the disk match the fresh staging directory is created and $fetch($stagedPath, $match)
+     * must download the template into that path. The size and sha256 check below then runs on
+     * the downloaded file, so the bytes that were hashed are the bytes that get extracted.
+     *
      * @param array<string,mixed> $plan validated plan
+     * @param callable(string,array<string,mixed>):void|null $fetch downloads the template to the given path
      * @return array{match:array<string,mixed>,steps:array<int,array<string,mixed>>,stage:?string}
      */
-    public function prepare(array $plan, bool $stage = false): array
+    public function prepare(array $plan, bool $stage = false, ?callable $fetch = null): array
     {
+        if ($fetch !== null && !$stage) {
+            throw new InstallRefusal('planInvalid', 'a template download needs a staged (execute) run');
+        }
         $inventory = DiskInventory::enumerate($this->reader);
         $state = $this->stateReader->read($this->reader, array_map(static fn (array $d): string => $d['kname'], $inventory));
         $match = DiskMatcher::match($plan, $inventory, $state);
@@ -58,7 +67,16 @@ final class Installer
         $t = $plan['template'];
         $stageDir = $this->stageRoot . '/mcxTemplate-stage-' . $plan['jobId'];
         $staged = $stageDir . '/' . ArchiveCheck::STAGE_FILE;
-        if ($stage) {
+        if ($fetch !== null) {
+            ArchiveCheck::makeStageDir($stageDir);
+            try {
+                $fetch($staged, $match);
+                ArchiveCheck::verifyFile($staged, $t['sizeBytes'], $t['sha256']);
+            } catch (\Throwable $e) {
+                ArchiveCheck::unstage($stageDir);
+                throw $e;
+            }
+        } elseif ($stage) {
             ArchiveCheck::stage($t['path'], $stageDir, $t['sizeBytes'], $t['sha256']);
         } else {
             ArchiveCheck::verifyFile($t['path'], $t['sizeBytes'], $t['sha256']);
@@ -90,6 +108,25 @@ final class Installer
      */
     public function execute(array $plan, array $prepared, string $secretOut, callable $say): void
     {
+        $this->perform($plan, $prepared, $secretOut, $say);
+    }
+
+    /**
+     * Network-mode twin of execute(): no secret file. The generated root password is returned
+     * in memory so the caller can deliver it to nodeCore; it is never written to disk here.
+     *
+     * @param array<string,mixed>   $plan
+     * @param array<string,mixed>   $prepared result of prepare($plan, true, $fetch)
+     * @param callable(string):void $say progress sink; receives step ids only
+     */
+    public function executeInMemory(array $plan, array $prepared, callable $say): string
+    {
+        return $this->perform($plan, $prepared, null, $say);
+    }
+
+    // perform is the shared body: $secretOut null keeps the password in memory and returns it.
+    private function perform(array $plan, array $prepared, ?string $secretOut, callable $say): string
+    {
         $stageDir = (string) ($prepared['stage'] ?? '');
         try {
             if (($plan['wipeAuthorized'] ?? false) !== true) {
@@ -98,10 +135,13 @@ final class Installer
             if ($stageDir === '') {
                 throw new InstallRefusal('templateNotStaged', 'execute needs a prepare() run that staged the template');
             }
-            RootPassword::assertUsablePath($secretOut, [LayoutPlanner::TARGET, $this->targetRoot]);
+            if ($secretOut !== null) {
+                RootPassword::assertUsablePath($secretOut, [LayoutPlanner::TARGET, $this->targetRoot]);
+            }
             $password = RootPassword::generate();
             $hash = RootPassword::hash($password);
             $this->runSteps($prepared, $hash, $secretOut, $password, $say);
+            return $secretOut === null ? $password : '';
         } finally {
             ArchiveCheck::unstage($stageDir);
         }
@@ -111,14 +151,14 @@ final class Installer
      * @param array<string,mixed>   $prepared
      * @param callable(string):void $say
      */
-    private function runSteps(array $prepared, string $hash, string $secretOut, string $password, callable $say): void
+    private function runSteps(array $prepared, string $hash, ?string $secretOut, string $password, callable $say): void
     {
         $mounted = [];
         $mdCreated = false;
         try {
             foreach ($prepared['steps'] as $step) {
                 $say($step['id']);
-                if (($step['kind'] ?? '') === 'password') {
+                if (($step['kind'] ?? '') === 'password' && $secretOut !== null) {
                     RootPassword::writeSecret($secretOut, $password);
                     $password = '';
                 }

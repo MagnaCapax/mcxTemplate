@@ -1,0 +1,1 @@
+../../../debian/common/tasks/05-clear-log-files.php

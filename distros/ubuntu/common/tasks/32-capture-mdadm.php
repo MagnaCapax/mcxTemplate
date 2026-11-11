@@ -1,0 +1,1 @@
+../../../debian/common/tasks/32-capture-mdadm.php

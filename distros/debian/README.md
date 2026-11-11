@@ -43,11 +43,15 @@ Tip: Override the primary interface used by templates via `--primary-interface` 
 - `21-render-hostname-files.php` – Applies the hostname and hosts templates for the distro.
 - `22-render-network-config.php` – Detects CIDR/gateway information, selects the primary
   interface, and renders `/etc/network/interfaces` from the distro template.
+- `23-render-resolvers.php` – Writes `/etc/resolv.conf` from `MCX_RESOLVERS` (one to three comma-separated
+  addresses). Skipped when absent unless `MCX_STRICT=1`; an invalid list always fails.
 - `24-fetch-ssh-keys.php` – Fetches remote SSH authorized keys when URIs are supplied.
 - `26-run-post-config.php` – Downloads and executes an optional site-specific post-config script.
 - `30-render-fstab.php` – Rebuilds `/etc/fstab` using the resolved mount specification.
 - `32-capture-mdadm.php` – Writes `mdadm.conf` when mdadm metadata is available.
 - `40-update-boot.php` – Refreshes initramfs images and reinstalls GRUB on the configured targets.
+- `90-remove-engine.php` – Opt-in (`MCX_REMOVE_ENGINE=1`, set by the network install): removes
+  `/opt/mcxTemplate` from the installed system. Last by number; add no task behind it.
 
 ## Templates and Overrides
 

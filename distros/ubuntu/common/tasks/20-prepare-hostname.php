@@ -1,0 +1,1 @@
+../../../debian/common/tasks/20-prepare-hostname.php

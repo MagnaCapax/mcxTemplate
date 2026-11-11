@@ -1,0 +1,1 @@
+../../../debian/common/tasks/23-render-resolvers.php

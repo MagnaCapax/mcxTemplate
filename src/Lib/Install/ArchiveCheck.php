@@ -34,6 +34,21 @@ final class ArchiveCheck
     }
 
     /**
+     * Create the fresh, private (mode 0700) staging directory $dir; refused when it already exists.
+     * Shared by stage() and by the network install, which downloads straight into the directory.
+     */
+    public static function makeStageDir(string $dir): void
+    {
+        $old = umask(0077);
+        $made = @mkdir($dir, 0700);
+        umask($old);
+        // mkdir(2) never follows a symlink at the last component, so "made" means a new, private directory.
+        if (!$made || is_link($dir) || !is_dir($dir)) {
+            throw new InstallRefusal('templateStageRefused', 'the staging directory already exists or could not be created');
+        }
+    }
+
+    /**
      * Copy $src into the fresh directory $dir (created here, mode 0700; refused when it
      * already exists), hashing the bytes as they are written. Returns the copy's path.
      * On any mismatch or I/O error the copy and the directory are removed again.
@@ -43,13 +58,7 @@ final class ArchiveCheck
         if (!is_file($src) || !is_readable($src)) {
             throw new InstallRefusal('templateMissing', 'the template file is not readable');
         }
-        $old = umask(0077);
-        $made = @mkdir($dir, 0700);
-        umask($old);
-        // mkdir(2) never follows a symlink at the last component, so "made" means a new, private directory.
-        if (!$made || is_link($dir) || !is_dir($dir)) {
-            throw new InstallRefusal('templateStageRefused', 'the staging directory already exists or could not be created');
-        }
+        self::makeStageDir($dir);
         $dest = $dir . '/' . self::STAGE_FILE;
         try {
             self::copyHashed($src, $dest, $size, $sha256);
@@ -137,6 +146,21 @@ final class ArchiveCheck
                 throw new InstallRefusal('templateLayoutRefused', "archive lacks $required");
             }
         }
+    }
+
+    /**
+     * Read one member of a tar.gz to memory through the runner. Archives made by the rehydrate tool name
+     * their members with a leading "./", others without, so both spellings are tried. Null when absent.
+     */
+    public static function readMember(CommandRunner $runner, string $archive, string $member): ?string
+    {
+        foreach (['./' . $member, $member] as $name) {
+            $r = $runner->run(['tar', '-xzOf', $archive, $name]);
+            if ($r['code'] === 0 && $r['out'] !== '') {
+                return $r['out'];
+            }
+        }
+        return null;
     }
 
     // checkLayout lists the archive through the runner, applies checkEntries and runs the existing auditor.

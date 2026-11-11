@@ -64,6 +64,18 @@ final class PlanValidator
         return $out;
     }
 
+    // httpsUrl is the one URL check for callers outside the plan (the network install's --api base).
+    public static function httpsUrl($v, string $name): string
+    {
+        return self::url($v, $name);
+    }
+
+    // macAddress is the one MAC check for callers outside the plan (the network install's --mac); lowercase on success.
+    public static function macAddress($v, string $name): string
+    {
+        return self::mac($v, $name);
+    }
+
     /** @return array<string,mixed> */
     private static function disks($raw, string $layout): array
     {

@@ -21,6 +21,7 @@ function printUsage(): void
     echo "  --source-host <host>   Hostname or IP for the SSH source.\n";
     echo "  --source-user <user>   SSH user. Defaults to root.\n";
     echo "  --output <file>        Target tar.gz file path.\n";
+    echo "  --force                Overwrite an existing --output file.\n";
     echo "  --template <path>      Local templating engine directory (defaults to repo root).\n";
     echo "  --embed-into-rootfs    Embed engine into rootfs/opt/mcxTemplate (default).\n";
     echo "  --no-embed-into-rootfs Package engine under template/ instead of rootfs.\n";
@@ -38,6 +39,7 @@ function parseArguments(array $argv): array
         'sourceHost' => '',
         'sourceUser' => 'root',
         'outputPath' => '',
+        'force' => false,
         // Default to the repository root so the full provisioning engine
         // (installTemplate.php, distros/, src/, etc.) is bundled.
         // This keeps rehydration simple: extract template/ to /opt/mcxTemplate.
@@ -69,9 +71,12 @@ function parseArguments(array $argv): array
             case '--output':
                 $config['outputPath'] = $argv[++$i] ?? '';
                 break;
+            case '--force':
+                $config['force'] = true;
+                break;
             case '--template':
-                // Always resolve template path to an absolute directory.
-                $config['templatePath'] = realpath($argv[++$i] ?? '') ?: '';
+                // Always resolve template path to an absolute directory; an empty value is an error, not the cwd.
+                $config['templatePath'] = resolveLocalPath($argv[++$i] ?? '');
                 break;
             case '--embed-into-rootfs':
                 $config['embedIntoRootfs'] = true;
@@ -84,8 +89,8 @@ function parseArguments(array $argv): array
                 break;
             case '--extra':
                 $extraInput = $argv[++$i] ?? '';
-                $extra = realpath($extraInput);
-                if ($extra !== false) {
+                $extra = resolveLocalPath($extraInput);
+                if ($extra !== '') {
                     $config['extras'][] = $extra;
                 } else {
                     fwrite(STDERR, "Skipping missing extra path: {$extraInput}\n");
@@ -169,14 +174,36 @@ function finalizeConfig(array $config): array
         fail('Missing required --source-host value.');
     }
 
+    // Refuse values rsync would read as options or split on whitespace before any remote work starts.
+    if (!isSafeSshToken($config['sourceHost'])) {
+        fail('Invalid --source-host value.');
+    }
+    if (!isSafeSshToken($config['sourceUser'])) {
+        fail('Invalid --source-user value.');
+    }
+
     if ($config['outputPath'] === '') {
         // Use a timestamped filename when the caller does not choose one.
         $config['outputPath'] = defaultOutputPath('template', $config['sourceHost']);
     }
 
+    // The archive is written by tar, which only understands filesystem paths: a stream wrapper such as
+    // php://output would make dirname() point at a bogus relative directory that mkdir() then creates.
+    if (preg_match('#^[A-Za-z][A-Za-z0-9+.-]*://#', $config['outputPath']) === 1) {
+        fail('Unable to create output directory.');
+    }
+
+    // Decide every output problem now: the rsync stage below can run for hours before tar writes anything.
     $outputDirectory = dirname($config['outputPath']);
     if (!is_dir($outputDirectory) && !mkdir($outputDirectory, 0755, true)) {
         fail('Unable to create output directory.');
+    }
+    if (!is_writable($outputDirectory)) {
+        fail('Output directory is not writable.');
+    }
+    // Guard against silent overwrites unless the operator opts in (same rule as templateCloneRemote.php).
+    if (file_exists($config['outputPath']) && !$config['force']) {
+        fail("Output file already exists: {$config['outputPath']}. Use --force to overwrite.");
     }
 
     // Validate toolchain binaries that the workflow depends on.

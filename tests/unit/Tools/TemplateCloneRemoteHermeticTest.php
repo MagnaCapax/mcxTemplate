@@ -18,8 +18,12 @@ final class TemplateCloneRemoteHermeticTest extends TestCase
         $this->fakeBinDir = $this->createFakeBinaryDir();
         $this->writeExecutable($this->fakeBinDir, 'ssh', <<<'SH'
 mode=${MCX_FAKE_SSH_MODE:-success}
-# consume remote script from stdin
-cat >/dev/null
+# consume remote script from stdin, keeping a copy when the test asks for one
+if [ -n "$MCX_FAKE_SSH_STDIN" ]; then
+    cat >"$MCX_FAKE_SSH_STDIN"
+else
+    cat >/dev/null
+fi
 if [ "$mode" = "success" ]; then
     if [ -z "$MCX_FAKE_SSH_TAR" ] || [ ! -f "$MCX_FAKE_SSH_TAR" ]; then
         echo "fake ssh: MCX_FAKE_SSH_TAR not set" >&2
@@ -63,6 +67,32 @@ SH);
         $this->assertContains('etc/hosts', $entries);
     }
 
+    public function testSshReceivesTheCaptureScriptOnStdin(): void
+    {
+        // The remote side only streams when it receives the capture script. A stdin pipe opened the wrong
+        // way round sent nothing and still reported success with an empty archive.
+        $tarPath = $this->createCompressedTar(['etc/hosts' => "127.0.0.1 localhost\n"]);
+        $outputPath = $this->generateTempFilePath('clone-stdin');
+        $stdinCopy = $this->generateTempFilePath('clone-stdin-copy');
+
+        $result = $this->runTool(
+            'tools/templateCloneRemote.php',
+            ['fake@host', $outputPath],
+            [
+                'PATH' => $this->fakeBinDir . PATH_SEPARATOR . getenv('PATH'),
+                'MCX_FAKE_SSH_MODE' => 'success',
+                'MCX_FAKE_SSH_TAR' => $tarPath,
+                'MCX_FAKE_SSH_STDIN' => $stdinCopy,
+            ]
+        );
+
+        $this->assertSame(0, $result['status'], $result['output']);
+        $this->assertFileExists($stdinCopy);
+        $script = (string) file_get_contents($stdinCopy);
+        $this->assertStringContainsString('set -euo pipefail', $script);
+        $this->assertStringContainsString('-cf - /', $script);
+    }
+
     public function testFailsWhenFakeSshReportsError(): void
     {
         // Failure path: fake ssh exits non-zero and the tool should surface the exit code.
@@ -80,6 +110,31 @@ SH);
         $this->assertNotSame(0, $result['status']);
         $this->assertStringContainsString('Streaming failed with exit code 3', $result['output']);
         $this->assertFileDoesNotExist($outputPath);
+    }
+
+    public function testRehydrateStreamFailureLeavesNoTemporaryDownload(): void
+    {
+        // In --rehydrate mode the stream lands in a temporary file first; a failed stream must remove it
+        // (fail() exits, so the caller's cleanup never runs) and must not produce the final archive.
+        $tmpRoot = $this->mkTempDir('mcx-clone-tmp-');
+        $engineDir = $this->mkTempDir('mcx-engine-');
+        file_put_contents($engineDir . '/installTemplate.php', 'engine');
+        $outputPath = $this->generateTempFilePath('clone-rehydrate-fail');
+
+        $result = $this->runTool(
+            'tools/templateCloneRemote.php',
+            ['fake@host', $outputPath, '--rehydrate', '--template', $engineDir],
+            [
+                'PATH' => $this->fakeBinDir . PATH_SEPARATOR . getenv('PATH'),
+                'MCX_FAKE_SSH_MODE' => 'fail',
+                'TMPDIR' => $tmpRoot,
+            ]
+        );
+
+        $this->assertNotSame(0, $result['status']);
+        $this->assertStringContainsString('Streaming failed with exit code 3', $result['output']);
+        $this->assertFileDoesNotExist($outputPath);
+        $this->assertSame([], glob($tmpRoot . '/*') ?: [], 'the temporary download must be removed after a failed stream');
     }
 
     public function testRehydrateSuccessCreatesEmbeddedArchive(): void

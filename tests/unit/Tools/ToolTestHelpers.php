@@ -13,6 +13,15 @@ trait ToolTestHelpers
     /** @var array<int,string> */
     protected array $toolTempPaths = [];
 
+    // skipWhenRoot ends the test as skipped where a permission-based scenario cannot be built:
+    // root reads and writes through mode 0000 files and unwritable directories.
+    protected function skipWhenRoot(): void
+    {
+        if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
+            $this->markTestSkipped('permission scenarios need an unprivileged user');
+        }
+    }
+
     protected function repoPath(string $relative): string
     {
         $path = realpath(__DIR__ . '/../../../' . $relative);
@@ -57,21 +66,43 @@ trait ToolTestHelpers
 
     protected function rmTree(string $path): void
     {
-        if (!is_dir($path)) {
+        if (!is_dir($path) || is_link($path)) {
+            @unlink($path);
             return;
         }
-        $it = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($path, \FilesystemIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST
-        );
-        foreach ($it as $item) {
-            if ($item->isDir()) {
-                @rmdir($item->getPathname());
+        // Permission scenarios leave directories at mode 0000 or 0555, which cannot be listed or emptied
+        // until they are restored; the iterator-based walk this replaces threw on them in tearDown.
+        @chmod($path, 0755);
+        foreach (scandir($path) ?: [] as $name) {
+            if ($name === '.' || $name === '..') {
+                continue;
+            }
+            $child = $path . DIRECTORY_SEPARATOR . $name;
+            if (is_dir($child) && !is_link($child)) {
+                $this->rmTree($child);
             } else {
-                @unlink($item->getPathname());
+                @unlink($child);
             }
         }
         @rmdir($path);
+    }
+
+    /**
+     * Child environment: the parent's real environment plus overrides, or null to inherit it unchanged.
+     *
+     * getenv() is used instead of $_ENV because php.ini-development and php.ini-production set
+     * variables_order to "GPCS", which leaves $_ENV empty; an override-only environment would then lose
+     * PATH and HOME and make every tool behave differently from one PHP configuration to the next.
+     *
+     * @param array<string,string> $env
+     * @return array<string,string>|null
+     */
+    protected function childEnvironment(array $env): ?array
+    {
+        if ($env === []) {
+            return null;
+        }
+        return array_merge(getenv(), $env);
     }
 
     /**
@@ -80,12 +111,13 @@ trait ToolTestHelpers
      * @param string $scriptRelative
      * @param array<int,string> $args
      * @param array<string,string> $env
+     * @param array<int,string> $phpArgs Extra arguments for the PHP binary itself, e.g. ['-d', 'disable_functions=posix_geteuid'].
      * @return array{status:int,stdout:string,stderr:string}
      */
-    protected function runTool(string $scriptRelative, array $args, array $env = []): array
+    protected function runTool(string $scriptRelative, array $args, array $env = [], array $phpArgs = []): array
     {
         $script = $this->repoPath($scriptRelative);
-        $commandParts = array_merge([PHP_BINARY, $script], $args);
+        $commandParts = array_merge([PHP_BINARY], $phpArgs, [$script], $args);
         $command = implode(' ', array_map('escapeshellarg', $commandParts));
 
         $descriptors = [
@@ -94,7 +126,7 @@ trait ToolTestHelpers
             2 => ['pipe', 'w'],
         ];
 
-        $environment = $env === [] ? null : array_merge($_ENV, $env);
+        $environment = $this->childEnvironment($env);
 
         $process = proc_open($command, $descriptors, $pipes, null, $environment);
         if (!is_resource($process)) {
@@ -129,7 +161,7 @@ trait ToolTestHelpers
             2 => ['pipe', 'w'],
         ];
 
-        $environment = $env === [] ? null : array_merge($_ENV, $env);
+        $environment = $this->childEnvironment($env);
 
         $process = proc_open($command, $descriptors, $pipes, null, $environment);
         if (!is_resource($process)) {

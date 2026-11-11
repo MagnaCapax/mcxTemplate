@@ -11,6 +11,16 @@ $longopts = [
 
 $options = getopt($shortopts, $longopts);
 
+// getopt() drops an option written with an explicit empty value ("--format=", "--output=") instead of
+// reporting it, so the tool would quietly fall back to its default format or to stdout. Refuse the
+// spelling up front so a typo or an empty shell variable cannot change where the summary goes.
+foreach (array_slice($argv, 1) as $arg) {
+    if ($arg === '--format=' || $arg === '--output=') {
+        fwrite(STDERR, "Option '{$arg}' needs a value.\n");
+        exit(1);
+    }
+}
+
 if ($options === false || !isset($options['input'])) {
     fwrite(STDERR, "Usage: analyze-structured-log.php --input=/path/to/structured.log [--output=summary.json] [--format=json|table]\n");
     exit(1);

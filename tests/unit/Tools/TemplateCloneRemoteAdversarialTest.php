@@ -17,6 +17,24 @@ final class TemplateCloneRemoteAdversarialTest extends TestCase
     }
 
     /**
+     * An endpoint that ssh would read as an option is refused before ssh starts.
+     */
+    public function testEndpointThatLooksLikeAnSshOptionIsRefusedBeforeSsh(): void
+    {
+        $fakeDir = $this->createFakeBinaryDir();
+        $marker = $fakeDir . '/ssh-called';
+        $this->writeExecutable($fakeDir, 'ssh', "touch " . escapeshellarg($marker) . "\nexit 255");
+        $env = ['PATH' => $fakeDir . PATH_SEPARATOR . (string) getenv('PATH')];
+        $result = $this->runTool('tools/templateCloneRemote.php', ['-oProxyCommand=true', '-'], $env);
+        $this->assertNotSame(0, $result['status']);
+        $this->assertStringContainsString('Invalid <user@host> value.', $result['output']);
+        $this->assertFileDoesNotExist($marker);
+    }
+
+    /**
+     * Data providers run on a bare instance without setUp(), so every scenario gets the running test
+     * instance as its first argument instead of capturing $this (PHPUnit 10+ also requires static providers).
+     *
      * @dataProvider provideAdversarialCases
      * @param array<int,string> $args
      * @param array<string,string> $env
@@ -25,7 +43,7 @@ final class TemplateCloneRemoteAdversarialTest extends TestCase
     {
         // Ensure invalid arguments or environments surface readable failure diagnostics.
         if ($setup !== null) {
-            $adjusted = $setup($args, $env);
+            $adjusted = $setup($this, $args, $env);
             if (isset($adjusted['args'])) {
                 $args = $adjusted['args'];
             } elseif (is_array($adjusted)) {
@@ -34,6 +52,13 @@ final class TemplateCloneRemoteAdversarialTest extends TestCase
             if (isset($adjusted['env'])) {
                 $env = array_merge($env, $adjusted['env']);
             }
+        }
+        // Hermetic: a scenario that did not choose its own PATH gets a fake ssh that always fails in front of
+        // the real one, so a scenario that gets as far as connecting can never reach a real host or resolver.
+        if (!isset($env['PATH'])) {
+            $fakeDir = $this->createFakeBinaryDir();
+            $this->writeExecutable($fakeDir, 'ssh', "cat >/dev/null\necho 'fake ssh: refused' >&2\nexit 255");
+            $env['PATH'] = $fakeDir . PATH_SEPARATOR . (string) getenv('PATH');
         }
         $result = $this->runTool('tools/templateCloneRemote.php', $args, $env);
         $combined = trim($result['output']);
@@ -44,7 +69,7 @@ final class TemplateCloneRemoteAdversarialTest extends TestCase
     /**
      * @return array<string,array{string,array<int,string>,array<string,string>,callable|null}>
      */
-    public function provideAdversarialCases(): array
+    public static function provideAdversarialCases(): array
     {
         return [
             'no arguments' => ['no arguments', [] , [] , null],
@@ -60,14 +85,20 @@ final class TemplateCloneRemoteAdversarialTest extends TestCase
             'unknown flag with rehydrate' => ['unknown flag with rehydrate', ['user@host', '-', '--rehydrate', '--mystery'], [], null],
             'no embed template missing' => ['no embed template missing', ['user@host', '-', '--rehydrate', '--no-embed-into-rootfs', '--template'], [], null],
             'empty PATH removes ssh' => ['empty PATH removes ssh', ['user@host', '-'], ['PATH' => '/nonexistent'], null],
-            'PATH limited to /bin removes ssh' => ['PATH limited to /bin removes ssh', ['user@host', '-'], ['PATH' => '/bin'], null],
+            // /bin may hold ssh on a real system, so the scenario builds a PATH that has the other tools but no ssh.
+            'PATH without ssh but with other tools' => ['PATH without ssh but with other tools', ['user@host', '-'], [], static function (self $t, array $args, array $env = []): array {
+                $dir = $t->createFakeBinaryDir();
+                $t->writeExecutable($dir, 'tar', 'exit 0');
+                $t->writeExecutable($dir, 'pigz', 'exit 0');
+                return ['args' => $args, 'env' => ['PATH' => $dir]];
+            }],
             'rehydrate with PATH empty' => ['rehydrate with PATH empty', ['user@host', '-', '--rehydrate'], ['PATH' => '/nonexistent'], null],
-            'existing output file without force' => ['existing output file without force', ['user@host', '__TEMP_FILE__'], [], function (array $args, array $env = []): array {
+            'existing output file without force' => ['existing output file without force', ['user@host', '__TEMP_FILE__'], [], static function (self $t, array $args, array $env = []): array {
                 $tmp = tempnam(sys_get_temp_dir(), 'mcx-clone-');
                 if ($tmp === false) {
                     throw new \RuntimeException('Unable to create temporary file.');
                 }
-                $this->registerTempPath($tmp);
+                $t->registerTempPath($tmp);
                 $args[1] = $tmp;
                 return ['args' => $args];
             }],
@@ -77,27 +108,27 @@ final class TemplateCloneRemoteAdversarialTest extends TestCase
             'rehydrate with template path empty string and env wiped' => ['rehydrate template empty with env wiped', ['user@host', '-', '--rehydrate', '--template', ''], ['PATH' => ''], null],
             'template realpath missing but embed force set' => ['template realpath missing embed force', ['user@host', '-', '--embed-force', '--template', '/not/here'], [], null],
             'rehydrate with template path whitespace' => ['rehydrate template whitespace', ['user@host', '-', '--rehydrate', '--template', '   '], [], null],
-            'fake PATH missing ssh' => ['fake PATH missing ssh', ['user@host', '-'], [], function (array $args, array $env = []): array {
-                $dir = $this->createFakeBinaryDir();
-                $this->registerTempPath($dir);
+            'fake PATH missing ssh' => ['fake PATH missing ssh', ['user@host', '-'], [], static function (self $t, array $args, array $env = []): array {
+                $dir = $t->createFakeBinaryDir();
+                $t->registerTempPath($dir);
                 return ['args' => $args, 'env' => ['PATH' => $dir]];
             }],
-            'fake ssh missing tar payload env' => ['fake ssh missing tar payload env', ['user@host', '-'], [], function (array $args, array $env = []): array {
-                $dir = $this->createFakeBinaryDir();
-                $this->registerTempPath($dir);
-                $this->writeExecutable($dir, 'ssh', "cat >/dev/null; echo 'fake ssh: MCX_FAKE_SSH_TAR not set' >&2; exit 5\n");
-                $this->writeExecutable($dir, 'rsync', 'exit 0');
-                $this->writeExecutable($dir, 'tar', 'exit 0');
-                $this->writeExecutable($dir, 'pigz', 'exit 0');
+            'fake ssh missing tar payload env' => ['fake ssh missing tar payload env', ['user@host', '-'], [], static function (self $t, array $args, array $env = []): array {
+                $dir = $t->createFakeBinaryDir();
+                $t->registerTempPath($dir);
+                $t->writeExecutable($dir, 'ssh', "cat >/dev/null; echo 'fake ssh: MCX_FAKE_SSH_TAR not set' >&2; exit 5\n");
+                $t->writeExecutable($dir, 'rsync', 'exit 0');
+                $t->writeExecutable($dir, 'tar', 'exit 0');
+                $t->writeExecutable($dir, 'pigz', 'exit 0');
                 return ['args' => $args, 'env' => ['PATH' => $dir]];
             }],
-            'template path points to file in rehydrate' => ['template path points to file in rehydrate', ['user@host', '-', '--rehydrate', '--template', '__FILE__'], [], function (array $args, array $env = []): array {
+            'template path points to file in rehydrate' => ['template path points to file in rehydrate', ['user@host', '-', '--rehydrate', '--template', '__FILE__'], [], static function (self $t, array $args, array $env = []): array {
                 $file = tempnam(sys_get_temp_dir(), 'mcx-file-');
                 if ($file === false) {
                     throw new \RuntimeException('Unable to create temp file.');
                 }
                 file_put_contents($file, 'engine');
-                $this->registerTempPath($file);
+                $t->registerTempPath($file);
                 $args[4] = $file;
                 return ['args' => $args];
             }],

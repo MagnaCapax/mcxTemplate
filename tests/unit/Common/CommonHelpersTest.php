@@ -30,7 +30,7 @@ final class CommonHelpersTest extends TestCase
     }
 
     // provideLoggingWrappers supplies a wide mix of log levels and message shapes to broaden coverage.
-    public function provideLoggingWrappers(): array
+    public static function provideLoggingWrappers(): array
     {
         return [
             'info simple' => ['logInfo', 'INFO', 'system online'],
@@ -71,7 +71,7 @@ final class CommonHelpersTest extends TestCase
     }
 
     // provideExitCodes exercises several realistic exit statuses to keep the behaviour predictable.
-    public function provideExitCodes(): array
+    public static function provideExitCodes(): array
     {
         return [
             'default one' => [1, 'primary failure'],
@@ -103,7 +103,7 @@ final class CommonHelpersTest extends TestCase
     }
 
     // provideAvailableCommands lists binaries bundled in every test container for stable assertions.
-    public function provideAvailableCommands(): array
+    public static function provideAvailableCommands(): array
     {
         return [
             'shell' => ['sh'],
@@ -136,7 +136,7 @@ final class CommonHelpersTest extends TestCase
     }
 
     // provideMissingCommands covers whitespace, shell tricks, and nonsense binaries to harden validation.
-    public function provideMissingCommands(): array
+    public static function provideMissingCommands(): array
     {
         return [
             'gibberish one' => ['mcx-missing-one'],
@@ -173,12 +173,12 @@ final class CommonHelpersTest extends TestCase
     }
 
     // provideReadableFilePaths references canonical repository files that should remain readable.
-    public function provideReadableFilePaths(): array
+    public static function provideReadableFilePaths(): array
     {
         return [
-            'common helpers' => [$this->resolvePath(__DIR__ . '/../../../src/Common/Lib/Common.php')],
-            'logging helper' => [$this->resolvePath(__DIR__ . '/../../../src/Lib/Common/Logging.php')],
-            'system helper' => [$this->resolvePath(__DIR__ . '/../../../src/Lib/Common/System.php')],
+            'common helpers' => [self::resolvePath(__DIR__ . '/../../../src/Common/Lib/Common.php')],
+            'logging helper' => [self::resolvePath(__DIR__ . '/../../../src/Lib/Common/Logging.php')],
+            'system helper' => [self::resolvePath(__DIR__ . '/../../../src/Lib/Common/System.php')],
         ];
     }
 
@@ -213,7 +213,7 @@ final class CommonHelpersTest extends TestCase
     }
 
     // provideUnreadableFileScenarios creates multiple failure modes so validation stays defensive.
-    public function provideUnreadableFileScenarios(): array
+    public static function provideUnreadableFileScenarios(): array
     {
         return [
             'missing absolute' => [static fn (): array => ['/definitely/not/here', null]],
@@ -256,7 +256,7 @@ final class CommonHelpersTest extends TestCase
     }
 
     // provideNonEmptyValues spans plain, spaced, and unicode strings with and without explicit labels.
-    public function provideNonEmptyValues(): array
+    public static function provideNonEmptyValues(): array
     {
         return [
             'simple default label' => ['ready', null, false],
@@ -288,7 +288,7 @@ final class CommonHelpersTest extends TestCase
     }
 
     // provideEmptyValues focuses on blank strings, whitespace, and explicit labels to guard regressions.
-    public function provideEmptyValues(): array
+    public static function provideEmptyValues(): array
     {
         return [
             'empty default' => ['', null, false, 'value'],
@@ -343,11 +343,13 @@ final class CommonHelpersTest extends TestCase
     }
 
     // resolvePath wraps realpath() so data providers can reuse the consistent failure handling logic.
-    private function resolvePath(string $path): string
+    // It is static because PHPUnit 10+ requires static data providers (9.6 accepts them), and a provider runs
+    // on a bare instance where $this->fail() is not available, so a bad path surfaces as an exception.
+    private static function resolvePath(string $path): string
     {
         $resolved = realpath($path);
         if ($resolved === false) {
-            $this->fail(sprintf('Unable to resolve path: %s', $path));
+            throw new \RuntimeException(sprintf('Unable to resolve path: %s', $path));
         }
 
         return $resolved;

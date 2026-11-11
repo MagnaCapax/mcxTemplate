@@ -69,6 +69,26 @@ function loadDirectoryEntries(string $root): array
     return $entries;
 }
 
+// findUnreadableEngineFiles lists engine files (anything under a distros/ directory) that exist in an
+// extracted template but cannot be read by this user. The auditor only lists names, so without this check
+// a template whose configure.php or task files are unreadable would be reported as complete and then fail
+// during installation. Only the engine tree is checked: a captured rootfs legitimately holds files such as
+// /etc/shadow that an unprivileged auditor cannot read.
+function findUnreadableEngineFiles(string $root, array $entries): array
+{
+    $unreadable = [];
+    foreach ($entries as $entry) {
+        if (!preg_match('#^(?:template/|rootfs/opt/mcxTemplate/)?distros/#', $entry)) {
+            continue;
+        }
+        $path = rtrim($root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $entry;
+        if (is_file($path) && !is_readable($path)) {
+            $unreadable[] = $entry;
+        }
+    }
+    return $unreadable;
+}
+
 function loadTarEntries(string $tarPath): array
 {
     if (!is_file($tarPath)) {
@@ -96,9 +116,12 @@ function checkTemplate(array $entries): array
     $bases = ['', 'template/', 'rootfs/opt/mcxTemplate/'];
     $requirements['distros/configure.php'] = presentUnderBases($entries, 'distros/configure.php', $bases);
 
+    // A distro is any distros/<name>/ directory other than the shared common/ tree. Discovering it from any
+    // entry (not only from its common/tasks files) is what lets a distro that lost its tasks be reported as
+    // missing them instead of vanishing from the audit.
     $distroDirs = [];
     foreach ($entries as $entry) {
-        if (preg_match('#^(?:distros|template/distros|rootfs/opt/mcxTemplate/distros)/([^/]+)/common/tasks(?:/|$)#', $entry, $match)) {
+        if (preg_match('#^(?:distros|template/distros|rootfs/opt/mcxTemplate/distros)/([^/]+)/#', $entry, $match) && $match[1] !== 'common') {
             $distroDirs[$match[1]] = true;
         }
     }
@@ -176,6 +199,12 @@ function main(array $argv): void
     }
 
     $requirements = checkTemplate($entries);
+    // Directory mode can also prove the engine files are readable; a tarball listing cannot.
+    if (is_dir($path)) {
+        foreach (findUnreadableEngineFiles($path, $entries) as $entry) {
+            $requirements['readable ' . $entry] = false;
+        }
+    }
     printReport($requirements);
 
     if (in_array(false, $requirements, true)) {

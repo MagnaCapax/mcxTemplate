@@ -74,7 +74,8 @@ function parseArguments(array $argv): array
             continue;
         }
         if ($arg === '--template') {
-            $config['templatePath'] = realpath($argv[++$i] ?? '') ?: '';
+            // An empty or missing value must stay empty (reported in main), not resolve to the cwd.
+            $config['templatePath'] = resolveLocalPath($argv[++$i] ?? '');
             continue;
         }
         if ($arg === '--embed-into-rootfs') {
@@ -107,6 +108,10 @@ function parseArguments(array $argv): array
         fail('Source and output arguments are required.');
     }
 
+    // The endpoint goes to ssh as one argument; refuse values ssh would read as an option.
+    if (!isSafeSshToken($positionals[0])) {
+        fail('Invalid <user@host> value.');
+    }
     $config['remote'] = $positionals[0];
     $config['output'] = $positionals[1];
 
@@ -192,7 +197,8 @@ function streamArchive(array $config): array
     $remoteScript = buildRemoteScript();
 
     $descriptors = [
-        0 => ['pipe', 'w'],
+        // The child reads its stdin, so the child end is 'r' and PHP gets the writable end.
+        0 => ['pipe', 'r'],
         1 => ['file', $destination['target'], 'w'],
         2 => ['file', 'php://stderr', 'w'],
     ];
@@ -202,11 +208,24 @@ function streamArchive(array $config): array
         fail('Unable to start ssh process.');
     }
 
-    fwrite($pipes[0], $remoteScript);
+    $written = fwrite($pipes[0], $remoteScript);
     fclose($pipes[0]);
+    if ($written !== strlen($remoteScript)) {
+        // Without the script the remote side streams nothing; never report an empty archive as done.
+        proc_close($process);
+        if (!$destination['isStdout'] && strpos($destination['target'], 'php://') !== 0) {
+            @unlink($destination['target']);
+        }
+        fail('Unable to send the capture script to ssh.');
+    }
 
     $exitCode = proc_close($process);
     if ($exitCode !== 0) {
+        // The descriptor above already created or truncated the file; a failed stream must not leave a
+        // partial archive behind that a later run or a consumer could mistake for a finished template.
+        if (!$destination['isStdout'] && strpos($destination['target'], 'php://') !== 0) {
+            @unlink($destination['target']);
+        }
         fail("Streaming failed with exit code {$exitCode}.");
     }
 
@@ -226,7 +245,8 @@ function streamArchiveToPath(array $config, string $path): void
     $remoteScript = buildRemoteScript();
 
     $descriptors = [
-        0 => ['pipe', 'w'],
+        // The child reads its stdin, so the child end is 'r' and PHP gets the writable end.
+        0 => ['pipe', 'r'],
         1 => ['file', $path, 'w'],
         2 => ['file', 'php://stderr', 'w'],
     ];
@@ -236,11 +256,19 @@ function streamArchiveToPath(array $config, string $path): void
         fail('Unable to start ssh process.');
     }
 
-    fwrite($pipes[0], $remoteScript);
+    $written = fwrite($pipes[0], $remoteScript);
     fclose($pipes[0]);
+    if ($written !== strlen($remoteScript)) {
+        // Without the script the remote side streams nothing; never report an empty archive as done.
+        proc_close($process);
+        @unlink($path);
+        fail('Unable to send the capture script to ssh.');
+    }
 
     $exitCode = proc_close($process);
     if ($exitCode !== 0) {
+        // fail() exits, so the caller's cleanup never runs: remove the temporary download here.
+        @unlink($path);
         fail("Streaming failed with exit code {$exitCode}.");
     }
 }

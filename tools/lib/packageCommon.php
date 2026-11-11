@@ -31,6 +31,25 @@ function commandExists(string $binary): bool
     return is_string($result) && trim($result) !== '';
 }
 
+// isSafeSshToken accepts ssh host, user and user@host values that cannot be read as an option or split on whitespace:
+// they start with a letter, digit or underscore and then use only name, address and bracket characters.
+function isSafeSshToken(string $value): bool
+{
+    return preg_match('/^[A-Za-z0-9_][A-Za-z0-9_.:@%\[\]-]*$/', $value) === 1;
+}
+
+// resolveLocalPath returns the real path of an existing file or directory, or '' when the value is empty or
+// missing. realpath('') resolves to the current directory, so a bare "--template" or "--extra ''" would
+// otherwise silently bundle the working directory instead of reporting the missing value.
+function resolveLocalPath(string $path): string
+{
+    if ($path === '') {
+        return '';
+    }
+    $real = realpath($path);
+    return $real === false ? '' : $real;
+}
+
 // ensureBinary enforces that a required binary is present before running.
 function ensureBinary(string $binary): void
 {

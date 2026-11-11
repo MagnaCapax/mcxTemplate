@@ -20,6 +20,15 @@ crafting new templates.
   rarely invoke it directly, but all scripts depend on its checks and
   path-handling helpers.
 
+## Input rules (ADR 0003)
+
+* An existing output file is never replaced unless `--force` is given
+  (templateAssemble, templateRehydrate, templateCloneRemote).
+* An empty or missing path value is an error, never the current directory.
+* Host, user and `user@host` values must start with a letter, digit or
+  underscore; values ssh or rsync would read as options are refused before any
+  remote work starts.
+
 ## Getting Started
 
 1. Ensure the host running these scripts has `php` available. Root privileges
@@ -148,7 +157,7 @@ permission to read the entire file system tree.
 ### Synopsis
 
 ```bash
-php tools/templateAssemble.php --source-host <host> --source-user <user> [--embed-into-rootfs|--no-embed-into-rootfs] [--embed-force] [--template <path>] [--output <path>] [--ssh-option <opt>]...
+php tools/templateAssemble.php --source-host <host> --source-user <user> [--embed-into-rootfs|--no-embed-into-rootfs] [--embed-force] [--template <path>] [--output <path>] [--force] [--ssh-option <opt>]...
 ```
 
 ### Usage
@@ -221,7 +230,7 @@ contains the mcxTemplate engine. It uses the shared rehydration helpers, matchin
 
 ```bash
 php tools/templateRehydrate.php --rootfs /path/rootfs.tar.gz [--output /path/template.tar.gz|--output -] \
-    [--template /path/to/mcxTemplate] [--embed-into-rootfs|--no-embed-into-rootfs] [--embed-force]
+    [--template /path/to/mcxTemplate] [--embed-into-rootfs|--no-embed-into-rootfs] [--embed-force] [--force]
 ```
 
 ### Usage

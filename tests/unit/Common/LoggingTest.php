@@ -20,7 +20,7 @@ final class LoggingTest extends TestCase
     }
 
     // provideLevelsAndMessages covers typical phrases plus tricky payloads like multiline strings.
-    public function provideLevelsAndMessages(): array
+    public static function provideLevelsAndMessages(): array
     {
         return [
             'info basic' => ['info', 'INFO', 'booting sequence'],
@@ -40,7 +40,9 @@ final class LoggingTest extends TestCase
             var_export('boom', true)
         );
 
-        $output = System::capture([PHP_BINARY, '-d', 'display_errors=1', '-r', $script], $status);
+        // log_errors=0 keeps the child's fatal from also being logged to the parent's stderr (CI noise); the
+        // assertion below reads the displayed copy.
+        $output = System::capture([PHP_BINARY, '-d', 'display_errors=1', '-d', 'log_errors=0', '-r', $script], $status);
         $this->assertNotSame(0, $status);
         $this->assertStringContainsString('Call to undefined method', $output);
     }

@@ -26,6 +26,21 @@ final class CheckTemplateSuccessTest extends TestCase
         $this->assertStringContainsString('OK', $result['stdout']);
     }
 
+    public function testUnreadableFileOutsideTheEngineTreeIsNotAnError(): void
+    {
+        // A captured rootfs holds files an unprivileged auditor cannot read (shadow files and the like);
+        // only the engine files under distros/ have to be readable.
+        $this->skipWhenRoot();
+        $layout = $this->buildValidTemplateLayout();
+        mkdir($layout . '/rootfs/etc', 0755, true);
+        file_put_contents($layout . '/rootfs/etc/shadow', 'secret');
+        chmod($layout . '/rootfs/etc/shadow', 0000);
+
+        $result = $this->runTool('tools/check-template.php', ['--path=' . $layout, '--dir']);
+
+        $this->assertSame(0, $result['status'], 'a private rootfs file must not fail the audit: ' . $result['output']);
+    }
+
     private function buildValidTemplateLayout(): string
     {
         $root = $this->mkTempDir('ct-success-');

@@ -37,6 +37,30 @@ final class TemplateRehydrateCliSuccessTest extends TestCase
         $this->assertContains('rootfs/opt/mcxTemplate/installTemplate.php', $entries);
     }
 
+    public function testForceReplacesAnExistingOutputFile(): void
+    {
+        // Without --force an existing archive is refused (adversarial suite); with it the archive is replaced.
+        $rootfsTar = $this->createRootfsTar(['etc/hostname' => "example-node\n"]);
+        $engineDir = $this->createEngineDir();
+        $outputPath = $this->registerTempPath(sys_get_temp_dir() . '/rehydrated-force-' . uniqid() . '.tar.gz');
+        file_put_contents($outputPath, 'stale archive');
+
+        $refused = $this->runTool(
+            'tools/templateRehydrate.php',
+            ['--rootfs', $rootfsTar, '--template', $engineDir, '--output', $outputPath]
+        );
+        $this->assertNotSame(0, $refused['status']);
+        $this->assertStringContainsString('Output file already exists:', $refused['output']);
+        $this->assertSame('stale archive', file_get_contents($outputPath), 'a refused run must leave the file untouched');
+
+        $result = $this->runTool(
+            'tools/templateRehydrate.php',
+            ['--rootfs', $rootfsTar, '--template', $engineDir, '--output', $outputPath, '--force']
+        );
+        $this->assertSame(0, $result['status'], $result['output']);
+        $this->assertContains('rootfs/etc/hostname', $this->listTarEntries($outputPath));
+    }
+
     public function testRehydrateStreamsToStdout(): void
     {
         // When output is '-', the rehydrated archive should be streamed to STDOUT successfully.
@@ -50,7 +74,14 @@ final class TemplateRehydrateCliSuccessTest extends TestCase
 
         $this->assertSame(0, $result['status'], 'Streaming mode should succeed: ' . $result['output']);
         $this->assertStringContainsString('Rehydrated archive stream completed', $result['stderr']);
-        $this->assertStringContainsString('rootfs/', $result['stdout']);
+
+        // STDOUT carries the gzip-compressed tarball, so its listing (not a text match) shows what was streamed.
+        $this->assertSame("\x1f\x8b", substr($result['stdout'], 0, 2), 'stdout should start with the gzip magic bytes');
+        $streamed = $this->registerTempPath(sys_get_temp_dir() . '/rehydrated-stream-' . uniqid() . '.tar.gz');
+        file_put_contents($streamed, $result['stdout']);
+        $entries = $this->listTarEntries($streamed);
+        $this->assertContains('rootfs/etc/hosts', $entries);
+        $this->assertContains('rootfs/opt/mcxTemplate/installTemplate.php', $entries);
     }
 
     /**
@@ -96,7 +127,11 @@ final class TemplateRehydrateCliSuccessTest extends TestCase
         if ($status !== 0) {
             $this->fail('Unable to list archive entries for ' . $path);
         }
-        return array_map(static fn(string $entry): string => rtrim($entry, '/'), $lines);
+        // The archive is packed from "-C <staging> .", so tar lists entries as "./rootfs/...".
+        return array_map(static function (string $entry): string {
+            $entry = rtrim($entry, '/');
+            return preg_replace('#^\./#', '', $entry) ?? $entry;
+        }, $lines);
     }
 }
 

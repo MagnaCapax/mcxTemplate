@@ -20,7 +20,7 @@ require_once __DIR__ . '/lib/rehydration.php';
 function printUsage(): void
 {
     $script = basename($_SERVER['argv'][0] ?? __FILE__);
-    echo "Usage: {$script} --rootfs <rootfs.tar.gz> [--output <file|->] [--template <path>] [--embed-into-rootfs|--no-embed-into-rootfs] [--embed-force]\n";
+    echo "Usage: {$script} --rootfs <rootfs.tar.gz> [--output <file|->] [--template <path>] [--embed-into-rootfs|--no-embed-into-rootfs] [--embed-force] [--force]\n";
     echo "\n";
     echo "Options:\n";
     echo "  --rootfs <path>          Path to a gzip-compressed tar archive of a root filesystem.\n";
@@ -29,6 +29,7 @@ function printUsage(): void
     echo "  --embed-into-rootfs      Embed engine into rootfs/opt/mcxTemplate (default).\n";
     echo "  --no-embed-into-rootfs   Place engine under template/ instead of rootfs.\n";
     echo "  --embed-force            Overwrite existing rootfs/opt/mcxTemplate if present.\n";
+    echo "  --force                  Overwrite an existing --output file.\n";
     echo "  --help                   Show this help message.\n";
 }
 
@@ -36,7 +37,7 @@ function printUsage(): void
  * Parse CLI arguments into a config array.
  *
  * @param array $argv Raw argv array.
- * @return array{rootfs:string,output:string,templatePath:string,embedIntoRootfs:bool,embedForce:bool}
+ * @return array{rootfs:string,output:string,templatePath:string,embedIntoRootfs:bool,embedForce:bool,force:bool}
  */
 function parseArguments(array $argv): array
 {
@@ -46,6 +47,7 @@ function parseArguments(array $argv): array
         'templatePath' => realpath(dirname(__DIR__)) ?: '',
         'embedIntoRootfs' => true,
         'embedForce' => false,
+        'force' => false,
     ];
 
     for ($i = 1; $i < count($argv); $i++) {
@@ -58,7 +60,8 @@ function parseArguments(array $argv): array
                 $config['output'] = $argv[++$i] ?? '';
                 break;
             case '--template':
-                $config['templatePath'] = realpath($argv[++$i] ?? '') ?: '';
+                // An empty or missing value must stay empty (reported below), not resolve to the cwd.
+                $config['templatePath'] = resolveLocalPath($argv[++$i] ?? '');
                 break;
             case '--embed-into-rootfs':
                 $config['embedIntoRootfs'] = true;
@@ -68,6 +71,9 @@ function parseArguments(array $argv): array
                 break;
             case '--embed-force':
                 $config['embedForce'] = true;
+                break;
+            case '--force':
+                $config['force'] = true;
                 break;
             case '--help':
                 printUsage();
@@ -118,6 +124,11 @@ function main(array $argv): void
     $outDir = dirname($config['output']);
     if (!is_dir($outDir) && !mkdir($outDir, 0755, true)) {
         fail('Unable to create output directory: ' . $outDir);
+    }
+
+    // Guard against silent overwrites unless the operator opts in (same rule as the other capture tools).
+    if (file_exists($config['output']) && !$config['force']) {
+        fail('Output file already exists: ' . $config['output'] . '. Use --force to overwrite.');
     }
 
     rehydrate_archive($config['rootfs'], $config['templatePath'], $config['output'], $config['embedIntoRootfs'], $config['embedForce']);

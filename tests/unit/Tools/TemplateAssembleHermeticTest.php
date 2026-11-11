@@ -20,14 +20,21 @@ final class TemplateAssembleHermeticTest extends TestCase
         // Fake ssh (rsync -e requires it) just exits successfully.
         $this->writeExecutable($this->fakeBinDir, 'ssh', "exit 0\n");
 
-        // Fake rsync copies from MCX_FAKE_RSYNC_SOURCE into the destination.
+        // Fake rsync stands in for both rsync calls the tool makes: the remote capture (source user@host:/)
+        // copies MCX_FAKE_RSYNC_SOURCE, and the local engine copy (source <dir>/.) copies that directory.
+        // Treating every call as the remote one left the engine out of the archive.
         $this->writeExecutable($this->fakeBinDir, 'rsync', <<<'SH'
 mode=${MCX_FAKE_RSYNC_MODE:-success}
 if [ "$mode" = "fail" ]; then
     echo "fake rsync failure" >&2
     exit 90
 fi
-src="$MCX_FAKE_RSYNC_SOURCE"
+# Source is the argument before the destination.
+eval "from=\${$(($# - 1))}"
+case "$from" in
+    *@*:/) src="$MCX_FAKE_RSYNC_SOURCE" ;;
+    *) src="$from" ;;
+esac
 if [ -z "$src" ] || [ ! -d "$src" ]; then
     echo "fake rsync source missing" >&2
     exit 91
@@ -76,6 +83,30 @@ SH);
         $entries = $this->listTarEntries($outputPath);
         $this->assertContains('rootfs/etc-hosts', $entries);
         $this->assertContains('rootfs/opt/mcxTemplate/installTemplate.php', $entries, 'Engine not embedded into rootfs');
+    }
+
+    public function testForceOverwritesAnExistingOutputFile(): void
+    {
+        // Without --force an existing archive is refused (adversarial suite); with it the archive is replaced.
+        $sourceDir = $this->mkTempDir('mcx-assemble-source-');
+        file_put_contents($sourceDir . '/etc-hosts', "127.0.0.1 localhost\n");
+        $engineDir = $this->mkTempDir('mcx-engine-');
+        file_put_contents($engineDir . '/installTemplate.php', "<?php echo 'engine';\n");
+
+        $outputPath = $this->generateTempFilePath('assemble-force');
+        file_put_contents($outputPath, 'stale archive');
+
+        $result = $this->runTool(
+            'tools/templateAssemble.php',
+            ['--source-host', 'fake-host', '--template', $engineDir, '--output', $outputPath, '--force'],
+            [
+                'PATH' => $this->fakeBinDir . PATH_SEPARATOR . getenv('PATH'),
+                'MCX_FAKE_RSYNC_SOURCE' => $sourceDir,
+            ]
+        );
+
+        $this->assertSame(0, $result['status'], '--force run failed: ' . $result['output']);
+        $this->assertContains('rootfs/etc-hosts', $this->listTarEntries($outputPath));
     }
 
     public function testAssembleFailsWhenFakeRsyncErrors(): void

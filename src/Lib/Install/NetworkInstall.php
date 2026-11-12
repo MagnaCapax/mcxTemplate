@@ -76,7 +76,10 @@ final class NetworkInstall
             $reporter->deliver($password, $facts);
             $password = '';
         } catch (\Throwable $error) {
-            $reporter->failed($error instanceof InstallRefusal ? $error->refusalCode() : 'internalError');
+            $code = $error instanceof InstallRefusal ? $error->refusalCode() : 'internalError';
+            // Only a failed step sends its message (step id, exit code, stderr): other refusals can name disk serials,
+            // which nodeCore keeps out of stored events, and an internal error stays the class name on the console.
+            $reporter->failed($code, $code === 'stepFailed' ? $error->getMessage() : '');
             throw $error;
         }
         if ($reboot) {

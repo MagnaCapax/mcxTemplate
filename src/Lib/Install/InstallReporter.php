@@ -6,7 +6,8 @@ namespace Lib\Install;
 // InstallReporter is the install's voice towards nodeCore for ONE job: it numbers the
 // events (seq starts at 1 and only advances when nodeCore accepted one, so there are no
 // gaps), turns the executor's step ids into the contract's phase events, reports a
-// failure as {phase, code}, and delivers the result until nodeCore acknowledges it.
+// failure as {phase, code} (plus error, the failing step and its stderr, for stepFailed),
+// and delivers the result until nodeCore acknowledges it.
 //
 // What may be sent: names, counts, device serials and kernel names. The token goes into
 // request bodies only (by NodeCoreClient); the root password goes into the result body
@@ -14,6 +15,8 @@ namespace Lib\Install;
 final class InstallReporter
 {
     public const ACK_WAIT_SECONDS = 600;
+    // ERROR_MAX caps the failed event's error text (the step id, exit code and up to 300 bytes of stderr fit).
+    public const ERROR_MAX = 400;
     // Step-id prefix => [phase, event posted once that phase is complete].
     private const WIPE = '/^(stopArray|(root|boot[01])(Wipefs|Zap|ZeroHead|ZeroTail|Reread))/D';
     private const PARTITION = '/^(partition|settle|wipe|mdCreate|mkfs|mkswap|mkdir|mount)/D';
@@ -119,6 +122,15 @@ final class InstallReporter
         }
     }
 
+    // errorText makes a failure message safe for an event: whitespace runs become one space, any other byte
+    // outside printable ASCII becomes '?', and the result is cut to ERROR_MAX bytes.
+    public static function errorText(string $message): string
+    {
+        $flat = (string) preg_replace('/[\s]+/', ' ', $message);
+        $ascii = (string) preg_replace('/[^\x20-\x7E]/', '?', $flat);
+        return substr(trim($ascii), 0, self::ERROR_MAX);
+    }
+
     // phaseOf maps a LayoutPlanner step id to the phase it belongs to; an unknown id stays in the current phase.
     public static function phaseOf(string $id, string $current): string
     {
@@ -144,12 +156,18 @@ final class InstallReporter
     }
 
     /**
-     * Report a failure: the failed event {phase, code}, then the closing result with ok=false.
+     * Report a failure: the failed event {phase, code[, error]}, then the closing result with ok=false.
      * Best effort: the install is already failing and its own error must reach the console.
+     * $error is sent only when non-empty, as errorText() cleaned it.
      */
-    public function failed(string $code): void
+    public function failed(string $code, string $error = ''): void
     {
-        $this->event('failed', ['phase' => $this->phase, 'code' => $code], false);
+        $detail = ['phase' => $this->phase, 'code' => $code];
+        $error = self::errorText($error);
+        if ($error !== '') {
+            $detail['error'] = $error;
+        }
+        $this->event('failed', $detail, false);
         try {
             $this->client->result(['jobId' => $this->jobId, 'token' => $this->token, 'ok' => false, 'code' => $code]);
         } catch (InstallRefusal $e) {

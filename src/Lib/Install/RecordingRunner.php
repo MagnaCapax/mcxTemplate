@@ -56,9 +56,9 @@ final class RecordingRunner implements CommandRunner
         return $this->stdins[$index] ?? null;
     }
 
-    // addResponse appends a scripted answer for commands starting with $prefix.
-    public function addResponse(array $prefix, string $out, int $code = 0): void
+    // addResponse appends a scripted answer (stdout, exit code, stderr) for commands starting with $prefix.
+    public function addResponse(array $prefix, string $out, int $code = 0, string $err = ''): void
     {
-        $this->responses[] = ['prefix' => $prefix, 'result' => ['code' => $code, 'out' => $out, 'err' => '']];
+        $this->responses[] = ['prefix' => $prefix, 'result' => ['code' => $code, 'out' => $out, 'err' => $err]];
     }
 }

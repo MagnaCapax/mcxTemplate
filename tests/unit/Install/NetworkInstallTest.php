@@ -234,12 +234,14 @@ final class NetworkInstallTest extends TestCase
 
     public function testStepFailureReportsTheRunningPhase(): void
     {
-        $this->w->writer->addResponse(['mkfs.ext4'], '', 1);
+        $this->w->writer->addResponse(['mkfs.ext4'], '', 1, "mke2fs: Device size reported to be zero.\n\tbad\x01");
         $code = $this->refusal(fn () => $this->network()->run(InstallFixtures::MAC, true, true));
         $this->assertSame('stepFailed', $code);
         $events = $this->w->server->to('/install/event');
         $failed = end($events)['body'];
-        $this->assertSame(['phase' => 'partition', 'code' => 'stepFailed'], $failed['detail']);
+        // The operator reading jobs/status must see which step failed and why, cleaned to printable ASCII.
+        $this->assertSame(['phase' => 'partition', 'code' => 'stepFailed',
+            'error' => 'stepFailed: mkfsBoot exited 1: mke2fs: Device size reported to be zero. bad?'], $failed['detail']);
         $this->assertContains('wiped', $this->w->server->eventNames());
         $this->assertNotContains('extracted', $this->w->server->eventNames());
         $this->assertSame(0, $this->rebootCalls());

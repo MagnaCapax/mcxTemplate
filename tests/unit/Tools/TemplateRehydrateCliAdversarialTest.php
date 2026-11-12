@@ -174,6 +174,22 @@ final class TemplateRehydrateCliAdversarialTest extends TestCase
         ];
     }
 
+    /**
+     * A failed extraction exits through fail(), and exit() skips finally blocks, so cleanup must not live only there.
+     * Expected: non-zero status and no mcxTemplate-rehydrate-* staging directory left in the temp directory.
+     */
+    public function testFailedExtractionLeavesNoStagingDirectory(): void
+    {
+        $tmp = $this->tmpDir . '/tmp';
+        mkdir($tmp, 0700);
+        $bad = $this->tmpDir . '/bad.tar.gz';
+        file_put_contents($bad, 'not a tar');
+        $process = $this->runTool('tools/templateRehydrate.php', ['--rootfs', $bad, '--output', $this->tmpDir . '/out.tar.gz'],
+            ['TMPDIR' => $tmp]);
+        $this->assertNotSame(0, $process['status'], $process['output']);
+        $this->assertSame([], glob($tmp . '/mcxTemplate-rehydrate-*') ?: [], 'the staging directory is removed on failure');
+    }
+
     // unwritableOutput returns a path below a regular file, which no user can create or write.
     private function unwritableOutput(string $relative): string
     {

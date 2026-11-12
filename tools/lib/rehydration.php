@@ -105,6 +105,9 @@ function rehydrate_archive(string $rootfsArchive, string $enginePath, string $ou
     if (!mkdir($stagingDir, 0755, true)) {
         fail('Unable to create rehydration staging directory.');
     }
+    // fail() exits, and exit() skips the finally block below; remove the staging tree at shutdown too, so a failed
+    // run (a full disk, a bad archive) does not leave an extracted root filesystem behind in the temp directory.
+    register_shutdown_function('rehydrate_remove_directory', $stagingDir);
 
     try {
         $rootfsDir = $stagingDir . DIRECTORY_SEPARATOR . 'rootfs';

@@ -36,6 +36,22 @@ final class DiskInventoryTest extends TestCase
         $this->assertSame('', $disks[2]['idPath'], 'missing udev data stays empty so the matcher can refuse');
     }
 
+    public function testRamBackedDevicesAreNotDisks(): void
+    {
+        // mcxRescue runs a zram swap; lsblk reports it as TYPE disk with a size and no serial.
+        $json = json_encode(['blockdevices' => [
+            ['name' => 'zram0', 'kname' => 'zram0', 'type' => 'disk', 'size' => 8306294784, 'serial' => null, 'rm' => false],
+            ['name' => 'nvme0n1', 'kname' => 'nvme0n1', 'type' => 'disk', 'size' => 2000398934016, 'serial' => 'NVME-ROOT-1',
+                'tran' => 'nvme', 'rm' => false],
+            ['name' => 'ram0', 'kname' => 'ram0', 'type' => 'disk', 'size' => 4194304, 'serial' => null, 'rm' => false],
+        ]]);
+        $r = new RecordingRunner();
+        $r->addResponse(['lsblk'], (string) $json);
+        $r->addResponse(['udevadm', 'info', '--query=property', '--name=/dev/nvme0n1'], "ID_PATH=pci-0000:01:00.0-nvme-1\n");
+        $disks = DiskInventory::enumerate($r);
+        $this->assertSame(['nvme0n1'], array_column($disks, 'kname'));
+    }
+
     public function testEnumerationUsesTheDocumentedLsblkColumns(): void
     {
         $runner = $this->runner();

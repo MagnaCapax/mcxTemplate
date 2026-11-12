@@ -49,6 +49,11 @@ final class DiskInventory
             if (preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/D', $kname) !== 1) {
                 throw new InstallRefusal('inventoryFailed', 'a disk has an unusable kernel name');
             }
+            if (preg_match('/^z?ram[0-9]+$/D', $kname) === 1) {
+                // RAM-backed block devices (the rescue image's zram swap) report TYPE disk but are not hardware;
+                // listed, they made a one-NVMe unit look like two root candidates to nodeCore's identity confirm.
+                continue;
+            }
             $udev = self::udev($runner, '/dev/' . $kname);
             $disks[] = [
                 'kname' => $kname,

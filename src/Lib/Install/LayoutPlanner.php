@@ -123,7 +123,9 @@ final class LayoutPlanner
             $steps[] = self::step('mkfsHome', ['mkfs.ext4', '-F', '-m', '0', '-L', 'home', '-U', $uu['home'], self::partName($dev, 4)], true, ['root']);
         }
 
-        return ['uuids' => $uu, 'mounts' => $home ? ['/', '/boot', '/home'] : ['/', '/boot'],
+        $devs = ['root' => self::partName($dev, 3), 'boot' => self::partName($dev, 1), 'home' => $home ? self::partName($dev, 4) : ''];
+
+        return ['uuids' => $uu, 'devs' => $devs, 'mounts' => $home ? ['/', '/boot', '/home'] : ['/', '/boot'],
             'grub' => [self::stablePath($disk)], 'grubRoles' => ['root'], 'stopMd' => false];
     }
 
@@ -166,7 +168,9 @@ final class LayoutPlanner
         $steps[] = self::step('mkswap', ['mkswap', '-U', $uu['swap'], self::partName($root['path'], 1)], true, ['root']);
         $steps[] = self::step('mkfsRoot', ['mkfs.ext4', '-F', '-L', 'root', '-U', $uu['root'], self::partName($root['path'], 2)], true, ['root']);
 
-        return ['uuids' => $uu, 'mounts' => ['/', '/boot'],
+        $devs = ['root' => self::partName($root['path'], 2), 'boot' => self::MD_BOOT, 'home' => ''];
+
+        return ['uuids' => $uu, 'devs' => $devs, 'mounts' => ['/', '/boot'],
             'grub' => [self::stablePath($sticks[0]), self::stablePath($sticks[1])], 'grubRoles' => ['root', 'boot0', 'boot1'],
             'stopMd' => true];
     }
@@ -182,13 +186,17 @@ final class LayoutPlanner
     {
         $t = self::TARGET;
         $u = $fs['uuids'];
+        $d = $fs['devs'];
+        // Mount by the partition just formatted, with the type named. A UUID= mount right after mkfs races udev:
+        // mkfs closing the partition makes udev re-probe it, and until that finishes mount saw no filesystem type
+        // (seen on a real NVMe: the mount failed 32 ms after mkfs and succeeded 28 ms later).
         $steps[] = self::step('mkdirTarget', ['mkdir', '-p', $t], false);
-        $steps[] = self::step('mountRoot', ['mount', 'UUID=' . $u['root'], $t], false);
+        $steps[] = self::step('mountRoot', ['mount', '-t', 'ext4', $d['root'], $t], false);
         $steps[] = self::step('mkdirBoot', ['mkdir', '-p', $t . '/boot'], false);
-        $steps[] = self::step('mountBoot', ['mount', 'UUID=' . $u['boot'], $t . '/boot'], false);
+        $steps[] = self::step('mountBoot', ['mount', '-t', 'ext4', $d['boot'], $t . '/boot'], false);
         if ($u['home'] !== '') {
             $steps[] = self::step('mkdirHome', ['mkdir', '-p', $t . '/home'], false);
-            $steps[] = self::step('mountHome', ['mount', 'UUID=' . $u['home'], $t . '/home'], false);
+            $steps[] = self::step('mountHome', ['mount', '-t', 'ext4', $d['home'], $t . '/home'], false);
         }
 
         // The archive was already verified (size, sha256, layout) before the first write.

@@ -89,6 +89,28 @@ final class LayoutPlannerTest extends TestCase
             'GRUB_TARGETS' => '/dev/disk/by-path/pci-0000:01:00.0-nvme-1'], $configure['env'], 'exactly this environment, nothing inherited');
     }
 
+    // A UUID= mount right after mkfs raced udev's re-probe on a real NVMe (mount saw no type and fell back to
+    // squashfs). Every mount must name the device just formatted and the filesystem type.
+    public function testMountsUseTheFormattedDeviceAndNameTheType(): void
+    {
+        $single = $this->singleSteps();
+        $this->assertSame(['mount', '-t', 'ext4', '/dev/nvme0n1p3', '/mnt/target'], $this->step($single, 'mountRoot')['argv']);
+        $this->assertSame(['mount', '-t', 'ext4', '/dev/nvme0n1p1', '/mnt/target/boot'], $this->step($single, 'mountBoot')['argv']);
+        $split = $this->singleSteps(true);
+        $this->assertSame(['mount', '-t', 'ext4', '/dev/nvme0n1p4', '/mnt/target/home'], $this->step($split, 'mountHome')['argv']);
+        $usb = $this->usbSteps();
+        $this->assertSame(['mount', '-t', 'ext4', '/dev/nvme0n1p2', '/mnt/target'], $this->step($usb, 'mountRoot')['argv']);
+        $this->assertSame(['mount', '-t', 'ext4', '/dev/md/mcxboot', '/mnt/target/boot'], $this->step($usb, 'mountBoot')['argv']);
+        foreach ([$single, $split, $usb] as $steps) {
+            foreach ($steps as $s) {
+                if (strncmp($s['id'], 'mount', 5) === 0) {
+                    $this->assertSame('-t', $s['argv'][1], $s['id'] . ' does not name the filesystem type');
+                    $this->assertStringStartsWith('/dev/', $s['argv'][3], $s['id'] . ' does not mount by device path');
+                }
+            }
+        }
+    }
+
     public function testHomeSplitAddsAFourthPartitionWithPmFilesystemOptions(): void
     {
         $steps = $this->singleSteps(true);

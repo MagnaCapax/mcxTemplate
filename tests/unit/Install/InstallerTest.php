@@ -20,6 +20,7 @@ final class InstallerTest extends TestCase
     private const TEMPLATE = 'pretend-archive';
     private string $dir = '';
     private bool $swapped = false;
+    private string $listing = "rootfs/\nrootfs/etc/os-release\nrootfs/opt/mcxTemplate/installTemplate.php\n";
     private string $sector = '';
 
     protected function setUp(): void
@@ -99,7 +100,7 @@ final class InstallerTest extends TestCase
                 }
             }
             if ($argv[0] === 'tar') {
-                return $ok("rootfs/\nrootfs/etc/os-release\nrootfs/opt/mcxTemplate/installTemplate.php\n");
+                return $ok($this->listing);
             }
             if ($argv[0] === 'findmnt') {
                 return ['code' => 1, 'out' => '', 'err' => ''];
@@ -149,6 +150,23 @@ final class InstallerTest extends TestCase
         $this->assertNotSame([], $prepared['steps']);
         $this->assertNull($prepared['stage']);
         $this->assertDirectoryDoesNotExist($this->stageDir(), 'a dry-run prepare writes nothing, not even the staged copy');
+    }
+
+    // A template spelled "./rootfs/..." (as the rehydrate tool writes it) must extract with --strip-components=2;
+    // one spelled "rootfs/..." with 1. Either way the tree lands on the target root.
+    public function testExtractStripMatchesTheArchiveSpelling(): void
+    {
+        $extract = function (): array {
+            foreach ($this->installer($this->reader(), new RecordingRunner())->prepare($this->plan())['steps'] as $step) {
+                if ($step['id'] === 'extract') {
+                    return $step['argv'];
+                }
+            }
+            $this->fail('no extract step');
+        };
+        $this->assertContains('--strip-components=1', $extract());
+        $this->listing = "./\n./rootfs/\n./rootfs/etc/os-release\n./rootfs/opt/mcxTemplate/installTemplate.php\n";
+        $this->assertContains('--strip-components=2', $extract());
     }
 
     public function testReaderIssuesNoDestructiveCommand(): void

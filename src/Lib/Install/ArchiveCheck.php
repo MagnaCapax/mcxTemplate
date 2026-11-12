@@ -120,14 +120,27 @@ final class ArchiveCheck
     }
 
     /**
-     * Refuse an archive that lacks the rootfs/ prefix or tries to escape it.
+     * Refuse an archive that lacks the rootfs/ prefix or tries to escape it, and return how many leading path
+     * components extraction must strip so rootfs/ lands on the target root: 2 when the members are spelled
+     * "./rootfs/..." (GNU tar counts the "." as a component), 1 when spelled "rootfs/...". Both spellings in one
+     * archive are refused, because one strip count cannot serve both.
      *
      * @param array<int,string> $entries tar member names
      */
-    public static function checkEntries(array $entries): void
+    public static function checkEntries(array $entries): int
     {
         $names = [];
+        $dotted = 0;
+        $bare = 0;
         foreach ($entries as $entry) {
+            if ($entry === '') {
+                continue;
+            }
+            if (strncmp($entry, './', 2) === 0) {
+                $dotted++;
+            } else {
+                $bare++;
+            }
             $name = preg_replace('#^\./+#', '', rtrim($entry, '/')) ?? $entry;
             if ($name === '' || $name === '.') {
                 continue;
@@ -146,6 +159,10 @@ final class ArchiveCheck
                 throw new InstallRefusal('templateLayoutRefused', "archive lacks $required");
             }
         }
+        if ($dotted > 0 && $bare > 0) {
+            throw new InstallRefusal('templateLayoutRefused', 'archive mixes ./rootfs/ and rootfs/ member names');
+        }
+        return $dotted > 0 ? 2 : 1;
     }
 
     /**
@@ -164,18 +181,20 @@ final class ArchiveCheck
     }
 
     // checkLayout lists the archive through the runner, applies checkEntries and runs the existing auditor.
-    public static function checkLayout(CommandRunner $runner, string $path): void
+    // Returns the strip count checkEntries derived from the member spelling.
+    public static function checkLayout(CommandRunner $runner, string $path): int
     {
         $list = $runner->run(['tar', '-tzf', $path]);
         if ($list['code'] !== 0) {
             throw new InstallRefusal('templateLayoutRefused', 'tar could not list the archive');
         }
-        self::checkEntries(explode("\n", trim($list['out'])));
+        $strip = self::checkEntries(explode("\n", trim($list['out'])));
 
         $tool = dirname(__DIR__, 3) . '/tools/check-template.php';
         $audit = $runner->run([PHP_BINARY, $tool, '--path=' . $path, '--tar']);
         if ($audit['code'] !== 0) {
             throw new InstallRefusal('templateAuditFailed', 'tools/check-template.php reported missing parts');
         }
+        return $strip;
     }
 }

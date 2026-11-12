@@ -111,6 +111,26 @@ final class LayoutPlannerTest extends TestCase
         }
     }
 
+    public function testExtractStripsTheComponentCountTheArchiveCheckFound(): void
+    {
+        $raw = InstallFixtures::rawPlan(['layout' => 'biosSingle']);
+        $raw['disks']['boot'] = [];
+        $raw['disks']['root']['sizeBytes'] = 1920383410176;
+        $inv = [InstallFixtures::disk('nvme0n1', ['serial' => 'NVME-ROOT-1', 'sizeBytes' => 1920383410176, 'idPath' => 'pci-0000:01:00.0-nvme-1'])];
+        $plan = InstallFixtures::plan($raw);
+        $match = DiskMatcher::match($plan, $inv, InstallFixtures::state(['partitions' => ['nvme0n1' => []]]));
+        $plan['template']['stripComponents'] = 2;
+        $steps = LayoutPlanner::plan($plan, $match, InstallFixtures::counterUuid());
+        $this->assertContains('--strip-components=2', $this->step($steps, 'extract')['argv']);
+        $plan['template']['stripComponents'] = 3;
+        try {
+            LayoutPlanner::plan($plan, $match, InstallFixtures::counterUuid());
+            $this->fail('a strip count other than 1 or 2 must be refused');
+        } catch (InstallRefusal $e) {
+            $this->assertSame('templateLayoutRefused', $e->refusalCode());
+        }
+    }
+
     public function testHomeSplitAddsAFourthPartitionWithPmFilesystemOptions(): void
     {
         $steps = $this->singleSteps(true);

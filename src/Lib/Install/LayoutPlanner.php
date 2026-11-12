@@ -199,9 +199,14 @@ final class LayoutPlanner
             $steps[] = self::step('mountHome', ['mount', '-t', 'ext4', $d['home'], $t . '/home'], false);
         }
 
-        // The archive was already verified (size, sha256, layout) before the first write.
+        // The archive was already verified (size, sha256, layout) before the first write. The strip count comes from
+        // that check: "./rootfs/x" members need 2, "rootfs/x" members 1, so rootfs/ lands on the target root.
+        $strip = (int) ($plan['template']['stripComponents'] ?? 1);
+        if ($strip !== 1 && $strip !== 2) {
+            throw new InstallRefusal('templateLayoutRefused', 'unexpected strip count for the template archive');
+        }
         $steps[] = self::step('extract', ['tar', '-xpzf', $plan['template']['path'], '--numeric-owner', '--xattrs', '--acls',
-            '--strip-components=1', '-C', $t], false);
+            '--strip-components=' . $strip, '-C', $t], false);
 
         $resolv = '';
         foreach ($plan['host']['resolvers'] as $ip) {

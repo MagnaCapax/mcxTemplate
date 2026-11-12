@@ -61,16 +61,21 @@ final class ArchiveCheckTest extends TestCase
         $this->assertCode('templateMissing', fn () => ArchiveCheck::verifyFile($this->dir . '/nope.tar.gz', 1, str_repeat('0', 64)));
     }
 
-    public function testArchiveWithRootfsPrefixPasses(): void
+    public function testArchiveWithRootfsPrefixPassesAndStripsOneComponent(): void
     {
-        ArchiveCheck::checkEntries(self::GOOD);
-        $this->addToAssertionCount(1);
+        $this->assertSame(1, ArchiveCheck::checkEntries(self::GOOD));
     }
 
-    public function testArchiveWithDotSlashPrefixPasses(): void
+    // GNU tar counts the leading "." as a component: "./rootfs/etc/x" needs --strip-components=2 to land on etc/x.
+    // With 1 the whole tree landed under the target's rootfs/ and the first write into /etc was refused.
+    public function testArchiveWithDotSlashPrefixPassesAndStripsTwoComponents(): void
     {
-        ArchiveCheck::checkEntries(array_map(static fn (string $e): string => './' . $e, self::GOOD));
-        $this->addToAssertionCount(1);
+        $this->assertSame(2, ArchiveCheck::checkEntries(array_merge(['./'], array_map(static fn (string $e): string => './' . $e, self::GOOD))));
+    }
+
+    public function testArchiveMixingDotSlashAndBareNamesIsRefused(): void
+    {
+        $this->assertCode('templateLayoutRefused', fn () => ArchiveCheck::checkEntries(array_merge(self::GOOD, ['./rootfs/etc/hosts'])));
     }
 
     public function testArchiveWithoutRootfsPrefixIsRefused(): void

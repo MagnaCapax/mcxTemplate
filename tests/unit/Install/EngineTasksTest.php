@@ -15,6 +15,7 @@ final class EngineTasksTest extends TestCase
         'resolvers' => 'distros/debian/common/tasks/23-render-resolvers.php',
         'cleanup' => 'distros/debian/common/tasks/90-remove-engine.php',
         'netplan' => 'distros/ubuntu/common/tasks/22-render-netplan.php',
+        'boot' => 'distros/debian/common/tasks/40-update-boot.php',
     ];
     private string $base = '';
     private string $root = '';
@@ -259,5 +260,52 @@ final class EngineTasksTest extends TestCase
         [$rc, $out] = $run(['MCX_REMOVE_ENGINE' => '1']);
         $this->assertSame(0, $rc, $out);
         $this->assertStringContainsString('would execute 90-remove-engine.php', $out);
+    }
+    // bootStubs puts update-initramfs, update-grub and grub-install stubs on a private PATH (each exits with
+    // the given status), so task 40 never reaches a real boot tool. Returns the env the task runs with.
+    /**
+     * @param array<string,int> $status
+     * @return array<string,string>
+     */
+    private function bootStubs(array $status): array
+    {
+        $bin = $this->base . '/stubbin';
+        mkdir($bin, 0700, true);
+        foreach (['update-initramfs', 'update-grub', 'grub-install'] as $cmd) {
+            file_put_contents($bin . '/' . $cmd, "#!/bin/sh\necho stub $cmd >&2\nexit " . ($status[$cmd] ?? 0) . "\n");
+            chmod($bin . '/' . $cmd, 0700);
+        }
+        touch($this->base . '/bootdisk');
+        return ['PATH' => $bin . ':/bin:/usr/bin', 'GRUB_TARGETS' => $this->base . '/bootdisk'];
+    }
+
+    public function testBootTaskFailsInStrictModeWhenGrubInstallFails(): void
+    {
+        [$rc, $out] = $this->runTask('boot', $this->bootStubs(['grub-install' => 1]) + ['MCX_STRICT' => '1']);
+        $this->assertNotSame(0, $rc, $out);
+        $this->assertStringContainsString('grub-install ' . $this->base . '/bootdisk failed and strict mode is on', $out);
+        $this->assertStringNotContainsString('Task 40 complete', $out);
+    }
+
+    public function testBootTaskFailsInStrictModeWhenUpdateGrubFails(): void
+    {
+        [$rc, $out] = $this->runTask('boot', $this->bootStubs(['update-grub' => 1]) + ['MCX_STRICT' => '1']);
+        $this->assertNotSame(0, $rc, $out);
+        $this->assertStringContainsString('update-grub failed and strict mode is on', $out);
+    }
+
+    public function testBootTaskKeepsWarningOnlyBehaviourWithoutStrict(): void
+    {
+        [$rc, $out] = $this->runTask('boot', $this->bootStubs(['update-initramfs' => 1, 'update-grub' => 1, 'grub-install' => 1]));
+        $this->assertSame(0, $rc, $out);
+        $this->assertStringContainsString('Task 40 complete', $out);
+    }
+
+    public function testBootTaskSucceedsInStrictModeWhenEveryCommandSucceeds(): void
+    {
+        [$rc, $out] = $this->runTask('boot', $this->bootStubs([]) + ['MCX_STRICT' => '1']);
+        $this->assertSame(0, $rc, $out);
+        $this->assertStringContainsString('stub grub-install', $out);
+        $this->assertStringContainsString('Task 40 complete', $out);
     }
 }

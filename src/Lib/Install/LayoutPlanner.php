@@ -30,6 +30,18 @@ final class LayoutPlanner
         'USER' => 'root', 'HOME' => '/root'];
 
     /**
+     * Files the layout cannot boot without, checked in the template listing before any write (ArchiveCheck::checkEntries).
+     * biosNvmeUsbBoot keeps /boot on an md RAID1: the installed system needs mdadm to assemble it, and configure task 32
+     * writes mdadm.conf only when mdadm exists (it skips with a warning otherwise, which BootVerifier then refuses).
+     *
+     * @return array<int,array{code:string,paths:array<int,string>}>
+     */
+    public static function templateNeeds(string $layout): array
+    {
+        return $layout === 'biosNvmeUsbBoot' ? [['code' => 'templateLacksMdadm', 'paths' => ['usr/sbin/mdadm', 'sbin/mdadm']]] : [];
+    }
+
+    /**
      * @param array<string,mixed> $plan  validated plan
      * @param array<string,mixed> $match  DiskMatcher::match result with ok=true
      * @param callable(): string|null $uuid UUID generator (tests inject a counter)

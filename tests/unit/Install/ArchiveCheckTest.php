@@ -5,6 +5,7 @@ namespace Tests\Unit\Install;
 
 use Lib\Install\ArchiveCheck;
 use Lib\Install\InstallRefusal;
+use Lib\Install\LayoutPlanner;
 use Lib\Install\RecordingRunner;
 use PHPUnit\Framework\TestCase;
 
@@ -139,6 +140,31 @@ final class ArchiveCheckTest extends TestCase
     public function testMissingEngineIsRefused(): void
     {
         $this->assertCode('templateLayoutRefused', fn () => ArchiveCheck::checkEntries(['rootfs/', 'rootfs/etc/os-release']));
+    }
+
+    public function testMdLayoutNeedsMdadmInTheTemplate(): void
+    {
+        $md = LayoutPlanner::templateNeeds('biosNvmeUsbBoot');
+        $this->assertCode('templateLacksMdadm', fn () => ArchiveCheck::checkEntries(self::GOOD, $md));
+        $this->assertSame(1, ArchiveCheck::checkEntries(array_merge(self::GOOD, ['rootfs/usr/sbin/mdadm']), $md));
+        $this->assertSame(1, ArchiveCheck::checkEntries(array_merge(self::GOOD, ['rootfs/sbin/mdadm']), $md), 'unmerged /sbin');
+        $dotted = array_map(static fn (string $e): string => './' . $e, array_merge(self::GOOD, ['rootfs/usr/sbin/mdadm']));
+        $this->assertSame(2, ArchiveCheck::checkEntries($dotted, $md));
+        $this->assertCode('templateLacksMdadm', fn () => ArchiveCheck::checkEntries(array_merge(self::GOOD, ['rootfs/usr/share/doc/mdadm', 'rootfs/usr/sbin/mdadm.d/x']), $md));
+    }
+
+    public function testSingleDiskLayoutNeedsNothingExtra(): void
+    {
+        $this->assertSame([], LayoutPlanner::templateNeeds('biosSingle'));
+        $this->assertSame(1, ArchiveCheck::checkEntries(self::GOOD, LayoutPlanner::templateNeeds('biosSingle')));
+    }
+
+    public function testLayoutCheckPassesTheNeedsToTheListing(): void
+    {
+        $runner = new RecordingRunner();
+        $runner->addResponse(['tar', '-tzf'], implode("\n", self::GOOD) . "\n");
+        $this->assertCode('templateLacksMdadm', fn () => ArchiveCheck::checkLayout($runner, '/run/t.tar.gz', LayoutPlanner::templateNeeds('biosNvmeUsbBoot')));
+        $this->assertCount(1, $runner->argvList(), 'refused at the listing, before the auditor runs');
     }
 
     public function testLayoutCheckListsThenAuditsThroughTheRunner(): void

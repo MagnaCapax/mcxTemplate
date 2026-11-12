@@ -200,7 +200,7 @@ final class NetworkWorld
                 return $ok("NAME=x\nPRETTY_NAME=\"Debian GNU/Linux 12 (bookworm)\"\n");
             }
             if ($argv[0] === 'tar') {
-                return $ok("rootfs/\nrootfs/etc/os-release\nrootfs/opt/mcxTemplate/installTemplate.php\n");
+                return $ok("rootfs/\nrootfs/etc/os-release\nrootfs/opt/mcxTemplate/installTemplate.php\nrootfs/usr/sbin/mdadm\n");
             }
             if ($argv[0] === 'findmnt') {
                 return ['code' => 1, 'out' => '', 'err' => ''];

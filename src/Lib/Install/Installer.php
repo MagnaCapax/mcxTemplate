@@ -82,7 +82,7 @@ final class Installer
             ArchiveCheck::verifyFile($t['path'], $t['sizeBytes'], $t['sha256']);
         }
         try {
-            $strip = ArchiveCheck::checkLayout($this->reader, $stage ? $staged : $t['path']);
+            $strip = ArchiveCheck::checkLayout($this->reader, $stage ? $staged : $t['path'], LayoutPlanner::templateNeeds((string) $plan['layout']));
             // The steps always name the staged copy, so a dry run shows the path an execute run extracts.
             $forSteps = $plan;
             $forSteps['template']['path'] = $staged;

@@ -125,9 +125,15 @@ final class ArchiveCheck
      * "./rootfs/..." (GNU tar counts the "." as a component), 1 when spelled "rootfs/...". Both spellings in one
      * archive are refused, because one strip count cannot serve both.
      *
+     * $needs are files a layout cannot boot without (LayoutPlanner::templateNeeds): each names a refusal code and
+     * rootfs-relative alternatives, one of which must be a member. Checked here, before any write, so a template that
+     * cannot serve the layout costs no disk (2026-11-12: a debian-12 template without mdadm was wiped onto a
+     * biosNvmeUsbBoot unit and only the post-install verify refused it).
+     *
      * @param array<int,string> $entries tar member names
+     * @param array<int,array{code:string,paths:array<int,string>}> $needs
      */
-    public static function checkEntries(array $entries): int
+    public static function checkEntries(array $entries, array $needs = []): int
     {
         $names = [];
         $dotted = 0;
@@ -159,6 +165,15 @@ final class ArchiveCheck
                 throw new InstallRefusal('templateLayoutRefused', "archive lacks $required");
             }
         }
+        foreach ($needs as $need) {
+            $found = false;
+            foreach ($need['paths'] as $path) {
+                $found = $found || isset($names['rootfs/' . $path]);
+            }
+            if (!$found) {
+                throw new InstallRefusal($need['code'], 'the layout needs ' . implode(' or ', $need['paths']) . ' in the template');
+            }
+        }
         if ($dotted > 0 && $bare > 0) {
             throw new InstallRefusal('templateLayoutRefused', 'archive mixes ./rootfs/ and rootfs/ member names');
         }
@@ -181,14 +196,15 @@ final class ArchiveCheck
     }
 
     // checkLayout lists the archive through the runner, applies checkEntries and runs the existing auditor.
-    // Returns the strip count checkEntries derived from the member spelling.
-    public static function checkLayout(CommandRunner $runner, string $path): int
+    // Returns the strip count checkEntries derived from the member spelling. $needs: see checkEntries.
+    /** @param array<int,array{code:string,paths:array<int,string>}> $needs */
+    public static function checkLayout(CommandRunner $runner, string $path, array $needs = []): int
     {
         $list = $runner->run(['tar', '-tzf', $path]);
         if ($list['code'] !== 0) {
             throw new InstallRefusal('templateLayoutRefused', 'tar could not list the archive');
         }
-        $strip = self::checkEntries(explode("\n", trim($list['out'])));
+        $strip = self::checkEntries(explode("\n", trim($list['out'])), $needs);
 
         $tool = dirname(__DIR__, 3) . '/tools/check-template.php';
         $audit = $runner->run([PHP_BINARY, $tool, '--path=' . $path, '--tar']);

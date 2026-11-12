@@ -20,7 +20,7 @@ final class InstallerTest extends TestCase
     private const TEMPLATE = 'pretend-archive';
     private string $dir = '';
     private bool $swapped = false;
-    private string $listing = "rootfs/\nrootfs/etc/os-release\nrootfs/opt/mcxTemplate/installTemplate.php\n";
+    private string $listing = "rootfs/\nrootfs/etc/os-release\nrootfs/opt/mcxTemplate/installTemplate.php\nrootfs/usr/sbin/mdadm\n";
     private string $sector = '';
 
     protected function setUp(): void
@@ -165,7 +165,7 @@ final class InstallerTest extends TestCase
             $this->fail('no extract step');
         };
         $this->assertContains('--strip-components=1', $extract());
-        $this->listing = "./\n./rootfs/\n./rootfs/etc/os-release\n./rootfs/opt/mcxTemplate/installTemplate.php\n";
+        $this->listing = "./\n./rootfs/\n./rootfs/etc/os-release\n./rootfs/opt/mcxTemplate/installTemplate.php\n./rootfs/usr/sbin/mdadm\n";
         $this->assertContains('--strip-components=2', $extract());
     }
 
@@ -180,6 +180,21 @@ final class InstallerTest extends TestCase
                 $this->assertSame('-tzf', $argv[1], 'the reader may only list an archive');
             }
         }
+    }
+
+    // biosNvmeUsbBoot keeps /boot on md RAID1, so a template without mdadm cannot boot it. The refusal comes from the
+    // listing in prepare, before the writer runs anything (2026-11-12: such a template was wiped onto a unit first).
+    public function testMdLayoutTemplateWithoutMdadmIsRefusedBeforeAnyWrite(): void
+    {
+        $this->listing = "rootfs/\nrootfs/etc/os-release\nrootfs/opt/mcxTemplate/installTemplate.php\n";
+        $writer = new RecordingRunner();
+        try {
+            $this->installer($this->reader(), $writer)->prepare($this->plan());
+            $this->fail('a template without mdadm was accepted for the md layout');
+        } catch (InstallRefusal $e) {
+            $this->assertSame('templateLacksMdadm', $e->refusalCode());
+        }
+        $this->assertSame([], $writer->calls());
     }
 
     public function testTamperedTemplateIsRefusedBeforeAnyStep(): void

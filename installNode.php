@@ -23,6 +23,7 @@ use Lib\Install\RecordingRunner;
 use Lib\Install\RootPassword;
 use Lib\Install\SystemStateReader;
 use Lib\Install\TemplateFetcher;
+use Lib\Install\TmpfsGrower;
 
 // Same Lib\ => src/Lib/ mapping as tests/bootstrap.php, for the runtime.
 spl_autoload_register(static function (string $class): void {
@@ -105,7 +106,10 @@ function runNetwork(array $flags): int
     $client = new NodeCoreClient($flags['api'], new CurlTransport(), null, static function (string $line): void {
         fwrite(STDERR, $line . "\n");
     });
-    $network = new NetworkInstall($client, new TemplateFetcher(new CurlTransport()), new Installer($reader, $writer, $state), $reader,
+    // The grower raises the /run tmpfs limit (10% of RAM by default) when free RAM can hold the template; it only
+    // runs inside fetch(), which an execute run alone reaches, so the dry-run recorder never has to answer it.
+    $fetcher = new TemplateFetcher(new CurlTransport(), null, null, new TmpfsGrower($reader, $writer));
+    $network = new NetworkInstall($client, $fetcher, new Installer($reader, $writer, $state), $reader,
         $writer, $state, static function (string $line): void {
             echo $line . "\n";
         }, ['isRoot' => function_exists('posix_geteuid') && posix_geteuid() === 0]);

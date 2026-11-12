@@ -19,16 +19,19 @@ final class TemplateFetcher
     private $freeSpace;
     /** @var callable():int */
     private $memAvailable;
+    private ?TmpfsGrower $grower;
 
     /**
      * @param callable(string):(int|float|false)|null $freeSpace   disk_free_space stand-in for tests
      * @param callable():int|null                     $memAvailable MemAvailable in bytes, 0 when unknown
+     * @param TmpfsGrower|null                        $grower      raises a too-small tmpfs limit when free RAM can hold the template; null keeps the plain refusal
      */
-    public function __construct(HttpTransport $http, ?callable $freeSpace = null, ?callable $memAvailable = null)
+    public function __construct(HttpTransport $http, ?callable $freeSpace = null, ?callable $memAvailable = null, ?TmpfsGrower $grower = null)
     {
         $this->http = $http;
         $this->freeSpace = $freeSpace ?? 'disk_free_space';
         $this->memAvailable = $memAvailable ?? [self::class, 'readMemAvailable'];
+        $this->grower = $grower;
     }
 
     /**
@@ -38,10 +41,17 @@ final class TemplateFetcher
     {
         $need = $sizeBytes + self::MARGIN_BYTES;
         $free = ($this->freeSpace)(dirname($dest));
+        $mem = ($this->memAvailable)();
+        // The rescue system caps /run at 10% of RAM. When that cap is the only thing in the way (the free
+        // RAM measured here holds the template plus margin), raise the cap once and measure again. An
+        // unknown RAM figure (0) never grows it: the RAM check below could not vouch for the new size.
+        if ($this->grower !== null && $free !== false && $free < $need && $mem >= $need) {
+            $this->grower->growFor(dirname($dest), $need, $free);
+            $free = ($this->freeSpace)(dirname($dest));
+        }
         if ($free === false || $free < $need) {
             throw new InstallRefusal('templateNoSpace', 'the staging filesystem cannot hold the template plus its margin');
         }
-        $mem = ($this->memAvailable)();
         // 0 means /proc/meminfo could not be read: only the filesystem check applies then.
         if ($mem > 0 && $mem < $need) {
             throw new InstallRefusal('templateNoSpace', 'free memory cannot hold the template plus its margin');

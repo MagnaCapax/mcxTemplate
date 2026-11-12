@@ -441,6 +441,14 @@ if ($distroVersion !== '') {
     // Keep only the major portion when dealing with dotted release numbers.
 }
 
+// Export what was detected: every task runs as its own process, and helpers find their templates through
+// MCX_DISTRO_ID (Common::findTemplate). Set only from --distro or the environment before, a detected distro left
+// tasks 21 and 22 without distros/<id>/templates, so every install kept the template's hostname and DHCP network.
+setEnvironmentValue('MCX_DISTRO_ID', $distroId);
+if ($distroVersion !== '') {
+    setEnvironmentValue('MCX_DISTRO_VERSION', $distroVersion);
+}
+
 Common::logInfo(
     "Configuring distro '{$distroId}' version '" . ($distroVersion === '' ? 'common' : $distroVersion) . "'.",
     ['distro' => $distroId, 'version' => $distroVersion === '' ? 'common' : $distroVersion]

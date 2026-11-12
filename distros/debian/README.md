@@ -39,8 +39,8 @@ Tip: Override the primary interface used by templates via `--primary-interface` 
 - `17-reset-systemd-entropy.php` – Drops cached systemd random seeds and credentials.
 - `19-clear-udev-and-resume.php` – Clears persistent udev rules, `machine-info`, and stale resume
   configuration.
-- `20-prepare-hostname.php` – Normalises hostname context (`MCX_SHORT_HOSTNAME`, `MCX_FQDN`, etc.).
-- `21-render-hostname-files.php` – Applies the hostname and hosts templates for the distro.
+- `21-render-hostname-files.php` – Normalises the hostname context (`MCX_SHORT_HOSTNAME`, `MCX_FQDN`, etc.) and
+  applies the hostname and hosts templates for the distro, in one process (each task runs as its own process).
 - `22-render-network-config.php` – Detects CIDR/gateway information, selects the primary
   interface, and renders `/etc/network/interfaces` from the distro template.
 - `23-render-resolvers.php` – Writes `/etc/resolv.conf` from `MCX_RESOLVERS` (one to three comma-separated

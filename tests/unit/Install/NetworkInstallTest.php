@@ -148,6 +148,17 @@ final class NetworkInstallTest extends TestCase
         $this->assertSame('00000000-0000-4000-8000-000000000003', $result['facts']['rootUuid']);
     }
 
+    // On real templates etc/os-release is a symlink, which tar -xO prints as nothing; the fact must come from
+    // usr/lib/os-release (seen on hardware 2026-11-12: the installed result carried osRelease "").
+    public function testOsReleaseFactFollowsTheUsrLibFileWhenEtcIsASymlink(): void
+    {
+        $this->w->osReleaseIsSymlink = true;
+        $this->w->server->script('/install/result', [FakeNodeCore::ok(['ack' => true])]);
+        $this->assertSame(0, $this->network()->run(InstallFixtures::MAC, true, false));
+        $result = $this->w->server->to('/install/result')[0]['body'];
+        $this->assertSame('Debian GNU/Linux 12 (bookworm)', $result['facts']['osRelease']);
+    }
+
     public function testTheServerSuppliedTemplatePathIsIgnoredAndTheDownloadStaysInTheStageDirectory(): void
     {
         $this->network()->run(InstallFixtures::MAC, true, false);

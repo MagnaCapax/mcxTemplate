@@ -100,6 +100,8 @@ final class NetworkWorld
     public string $dir;
     public RecordingRunner $writer;
     public CallbackRunner $reader;
+    // Debian and Ubuntu ship etc/os-release as a symlink to ../usr/lib/os-release; tar -xO of that member prints nothing.
+    public bool $osReleaseIsSymlink = false;
     public FakeNodeCore $server;
     /** @var array<int,string> */
     public array $console = [];
@@ -192,6 +194,9 @@ final class NetworkWorld
                 }
             }
             if ($argv[0] === 'tar' && in_array('-xzOf', $argv, true)) {
+                if ($this->osReleaseIsSymlink && str_ends_with((string) end($argv), 'etc/os-release')) {
+                    return $ok('');
+                }
                 return $ok("NAME=x\nPRETTY_NAME=\"Debian GNU/Linux 12 (bookworm)\"\n");
             }
             if ($argv[0] === 'tar') {

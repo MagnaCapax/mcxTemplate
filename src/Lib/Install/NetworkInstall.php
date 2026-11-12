@@ -217,13 +217,17 @@ final class NetworkInstall
         return $steps;
     }
 
-    // osRelease reads PRETTY_NAME from the staged archive (read-only); '' when it cannot be read.
+    // osRelease reads PRETTY_NAME from the staged archive (read-only); '' when it cannot be read. os-release(5):
+    // /etc/os-release, else /usr/lib/os-release. On Debian and Ubuntu the first is a relative symlink, and tar -xO of a
+    // symlink member prints nothing, so the target is read as the fallback (as ReleaseBuilder::manifest does).
     private function osRelease(?string $stageDir): string
     {
         if ($stageDir === null) {
             return '';
         }
-        $text = ArchiveCheck::readMember($this->reader, $stageDir . '/' . ArchiveCheck::STAGE_FILE, 'rootfs/etc/os-release');
+        $archive = $stageDir . '/' . ArchiveCheck::STAGE_FILE;
+        $text = ArchiveCheck::readMember($this->reader, $archive, 'rootfs/etc/os-release')
+            ?? ArchiveCheck::readMember($this->reader, $archive, 'rootfs/usr/lib/os-release');
         if ($text !== null && preg_match('/^PRETTY_NAME="?([^"\n]{1,120})"?$/m', $text, $m) === 1) {
             return $m[1];
         }

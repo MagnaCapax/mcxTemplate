@@ -134,7 +134,8 @@ final class ReleaseBuilderTest extends TestCase
         $this->assertSame('old release', file_get_contents($this->dir . '/out/debian-12-base-20261111.tar.gz'));
     }
 
-    public function testEndToEndWithTheRealToolsInAThrowAwayRepository(): void
+    // throwAwayRepo commits a copy of the engine files to a new git repository and returns its path.
+    private function throwAwayRepo(ProcessRunner $run): string
     {
         foreach (['git', 'tar', 'pigz', 'rsync', 'cp', 'sh'] as $bin) {
             if (trim((string) shell_exec('command -v ' . $bin . ' 2>/dev/null')) === '') {
@@ -144,7 +145,6 @@ final class ReleaseBuilderTest extends TestCase
         $real = realpath(__DIR__ . '/../../..');
         $repo = $this->dir . '/repo';
         mkdir($repo);
-        $run = new ProcessRunner();
         $must = function (array $argv, ?string $cwd = null) use ($run): void {
             $r = $run->run($cwd === null ? $argv : array_merge(['git', '-C', $cwd], $argv));
             $this->assertSame(0, $r['code'], implode(' ', $argv) . ': ' . $r['err']);
@@ -155,6 +155,36 @@ final class ReleaseBuilderTest extends TestCase
         $must(['init', '-q'], $repo);
         $must(['add', '-A'], $repo);
         $must(['-c', 'user.name=t', '-c', 'user.email=t@example.test', 'commit', '-q', '-m', 'engine'], $repo);
+        return $repo;
+    }
+
+    /**
+     * A real Debian capture: etc/os-release is a relative symlink to usr/lib/os-release, and an old capture can
+     * hold a stale /opt/mcxTemplate. Expected: distro read through the fallback, and the pinned engine replaces the
+     * stale copy (check-template passes and the stale file is gone).
+     */
+    public function testASymlinkedOsReleaseAndAStaleEngineInTheCapture(): void
+    {
+        $run = new ProcessRunner();
+        $repo = $this->throwAwayRepo($run);
+        $rootfs = TarFixture::write($this->dir . '/rootfs.tar.gz', [['etc/shadow', self::SHADOW],
+            ['usr/lib/os-release', "ID=debian\nVERSION_ID=\"13\"\n"], ['etc/os-release', '../usr/lib/os-release', '2'],
+            ['opt/mcxTemplate/Debian/bookworm/stale-engine.txt', "old layout\n"]]);
+        $out = $this->dir . '/out';
+        $builder = new ReleaseBuilder($run, $repo, false, true, static fn (): int => 1793318400);
+        $r = $builder->build($rootfs, 'debian-13-base', '20261111', $out, self::API, self::BASE);
+
+        $manifest = json_decode((string) file_get_contents($out . '/debian-13-base-20261111.tar.gz.manifest.json'), true);
+        $this->assertSame(['debian', '13'], [$manifest['distro'], $manifest['distroVersion']]);
+        $list = $run->run(['tar', '-tzf', $r['template']])['out'];
+        $this->assertStringContainsString('rootfs/opt/mcxTemplate/distros/configure.php', $list);
+        $this->assertStringNotContainsString('stale-engine.txt', $list, 'the pinned engine replaces a stale copy');
+    }
+
+    public function testEndToEndWithTheRealToolsInAThrowAwayRepository(): void
+    {
+        $run = new ProcessRunner();
+        $repo = $this->throwAwayRepo($run);
 
         $rootfs = $this->rootfs();
         $out = $this->dir . '/out';

@@ -76,8 +76,9 @@ final class ReleaseBuilder
         }
         try {
             $this->exportHead($commit, $work, $engineDir);
+            // A release carries exactly the engine of the commit it pins; an engine copy already in the capture is stale.
             $this->mustRun([PHP_BINARY, $this->repo . '/tools/templateRehydrate.php', '--rootfs', $rootfs, '--output', $template,
-                '--template', $engineDir], 'rehydrateFailed');
+                '--template', $engineDir, '--embed-force'], 'rehydrateFailed');
             $this->mustRun([PHP_BINARY, $this->repo . '/tools/check-template.php', '--path=' . $template, '--tar'], 'checkTemplateFailed');
             $manifest = $this->manifest($template, $name, $version, $commit, $artifactBase . '/' . $file);
             $sha = $manifest['sha256'];
@@ -161,7 +162,10 @@ final class ReleaseBuilder
      */
     private function manifest(string $template, string $name, string $version, string $commit, string $url): array
     {
-        $osRelease = ArchiveCheck::readMember($this->runner, $template, 'rootfs/etc/os-release') ?? '';
+        // os-release(5): /etc/os-release, else /usr/lib/os-release. On Debian and Ubuntu the first is a relative symlink
+        // to the second, and tar -xO of a symlink member prints nothing, so the target is read as the fallback.
+        $osRelease = ArchiveCheck::readMember($this->runner, $template, 'rootfs/etc/os-release')
+            ?? ArchiveCheck::readMember($this->runner, $template, 'rootfs/usr/lib/os-release') ?? '';
         $id = $versionId = '';
         foreach (explode("\n", $osRelease) as $line) {
             if (preg_match('/^(ID|VERSION_ID)="?([A-Za-z0-9._-]{1,32})"?$/', trim($line), $m) === 1) {

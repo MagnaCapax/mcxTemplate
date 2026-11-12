@@ -111,6 +111,25 @@ final class CommonTemplateTest extends TestCase
         $this->assertSame('eth0', Common::detectPrimaryInterface('eth0'));
     }
 
+    // A rescue system names the NIC eno1; the installed Debian boots with net.ifnames=0 and calls it eth0. A stanza for
+    // eno1 never comes up there, which left installed nodes with no network.
+    public function testInstalledInterfaceNameUsesKernelNamesWhenTheTargetDisablesPredictableNames(): void
+    {
+        $grub = "GRUB_DEFAULT=0\nGRUB_CMDLINE_LINUX_DEFAULT=\"quiet\"\nGRUB_CMDLINE_LINUX=\"text net.ifnames=0 biosdevname=0\"\n";
+        $this->assertSame('eth0', Common::installedInterfaceName('eno1', $grub, ['eno1']));
+        $this->assertSame('eth1', Common::installedInterfaceName('enp2s0', $grub, ['enp1s0', 'enp2s0']));
+        $this->assertSame('eth0', Common::installedInterfaceName('br0', $grub, ['enp1s0']));
+        $this->assertSame('eth0', Common::installedInterfaceName('eno1', 'GRUB_CMDLINE_LINUX="net.ifnames=0"', ['eno1']));
+    }
+
+    public function testInstalledInterfaceNameKeepsTheLiveNameWhenTheTargetUsesPredictableNames(): void
+    {
+        $this->assertSame('eno1', Common::installedInterfaceName('eno1', "GRUB_CMDLINE_LINUX=\"quiet\"\n", ['eno1']));
+        $this->assertSame('eno1', Common::installedInterfaceName('eno1', '', ['eno1']));
+        $this->assertSame('eno1', Common::installedInterfaceName('eno1', "#GRUB_CMDLINE_LINUX=\"net.ifnames=0\"\n", ['eno1']));
+        $this->assertSame('eno1', Common::installedInterfaceName('eno1', 'GRUB_CMDLINE_LINUX="net.ifnames=01"', ['eno1']));
+    }
+
     private function createTempDir(): string
     {
         $dir = sys_get_temp_dir() . '/mcxTemplate-test-' . uniqid('', true);

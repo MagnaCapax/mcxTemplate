@@ -36,7 +36,7 @@ if ($cidr === '' || $gateway === '') {
     return;
 }
 
-$interface = Common::detectPrimaryInterface();
+$interface = Common::installedPrimaryInterface();
 $resolvers = array_values(array_filter(array_map('trim', explode(',', (string) (getenv('MCX_RESOLVERS') ?: '')))));
 $valid = preg_match('#^\d{1,3}(?:\.\d{1,3}){3}/\d{1,2}$#D', $cidr) === 1
     && filter_var(explode('/', $cidr)[0], FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false

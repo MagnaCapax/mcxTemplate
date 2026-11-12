@@ -348,6 +348,64 @@ class Common
     }
 
     /**
+     * Name the installed system will give the NIC that the running (rescue) system calls $liveName.
+     *
+     * The network task runs in a chroot under the rescue system, whose udev names NICs predictably (eno1). A target
+     * whose GRUB defaults carry net.ifnames=0 keeps the kernel names instead (eth0, eth1, ... in probe order), so a
+     * stanza for the rescue's name would never come up and the installed node would have no network.
+     *
+     * @param string $grubDefaults Contents of the target's /etc/default/grub (and grub.d snippets).
+     * @param array<int,string> $physicalNics The running system's physical NIC names, ordered by ifindex (probe order).
+     */
+    public static function installedInterfaceName(string $liveName, string $grubDefaults, array $physicalNics): string
+    {
+        $kernelNames = false;
+        foreach (preg_split('/\r?\n/', $grubDefaults) ?: [] as $line) {
+            $line = trim((string) $line);
+            if ($line !== '' && $line[0] !== '#' && preg_match('/(^|[\s"\'=])net\.ifnames=0([\s"\']|$)/', $line) === 1) {
+                $kernelNames = true;
+            }
+        }
+        if (!$kernelNames) {
+            return $liveName;
+        }
+        $position = array_search($liveName, array_values($physicalNics), true);
+        return 'eth' . ($position === false ? 0 : $position);
+    }
+
+    /**
+     * Primary NIC name for the installed system: MCX_PRIMARY_INTERFACE when set, otherwise the running system's
+     * default-route NIC named as the target will name it (installedInterfaceName with the target's GRUB defaults).
+     * MCX_TARGET_ROOT is a test seam standing in for the target's /.
+     */
+    public static function installedPrimaryInterface(): string
+    {
+        $override = trim((string) (getenv('MCX_PRIMARY_INTERFACE') ?: ''));
+        if ($override !== '') {
+            return $override;
+        }
+        $live = self::detectPrimaryInterface();
+        $root = rtrim((string) (getenv('MCX_TARGET_ROOT') ?: ''), '/');
+        $grubDefaults = (string) @file_get_contents($root . '/etc/default/grub');
+        foreach (glob($root . '/etc/default/grub.d/*.cfg') ?: [] as $snippet) {
+            $grubDefaults .= "\n" . (string) @file_get_contents($snippet);
+        }
+        $physical = [];
+        foreach (glob('/sys/class/net/*') ?: [] as $path) {
+            if (is_dir($path . '/device')) {
+                $physical[(int) trim((string) @file_get_contents($path . '/ifindex'))] = basename($path);
+            }
+        }
+        ksort($physical);
+        $installed = self::installedInterfaceName($live, $grubDefaults, array_values($physical));
+        if ($installed !== $live) {
+            self::logInfo("NIC {$live} will be {$installed} on the installed system (net.ifnames=0).",
+                ['live' => $live, 'installed' => $installed, 'physical' => array_values($physical)]);
+        }
+        return $installed;
+    }
+
+    /**
      * Produce candidate template roots based on the repository layout.
      */
     private static function templateRoots(?string $distroId = null): array

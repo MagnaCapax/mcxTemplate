@@ -122,12 +122,16 @@ template. Common options include:
 - `--hostname=<fqdn>` – Fully-qualified hostname to apply inside the chroot.
 - `--host-ip=<address>` – Primary host IP for `/etc/hosts` when the network is
   not discoverable automatically.
-- `--network-cidr=<cidr>` / `--gateway=<address>` – Override network detection
-  when the rescue environment cannot infer routes.
+- `--network-cidr=<cidr>` / `--gateway=<address>` – The address and gateway to
+  write (the installer always passes them). Without them task 22 falls back to
+  the rescue environment's own address and default route.
 - `--hosts-template=<path>` – Custom `/etc/hosts` template containing
   `{{SHORT_HOSTNAME}}`, `{{FQDN}}`, and `{{HOST_IP}}` placeholders.
 - `--primary-interface=<name>` – Override the detected primary network interface used when
-  rendering distro templates.
+  rendering distro templates. Without it the rescue's default-route NIC is used, named as
+  the installed system will name it: a template whose GRUB defaults carry
+  `net.ifnames=0` gets `eth<N>` (N = the NIC's place among physical NICs by ifindex),
+  not the rescue's `eno1`.
 
 **Storage**
 

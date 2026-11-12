@@ -53,7 +53,14 @@ function gatherNetworkInformation(): array
     return [$cidr, $gateway];
 }
 
-[$cidr, $gateway] = gatherNetworkInformation();
+// The installer passes the planned address (--network-cidr, --gateway); the rescue system's own lease is only a fallback.
+$plannedCidr = trim((string) (getenv('MCX_NETWORK_CIDR') ?: ''));
+if ($plannedCidr !== '') {
+    $cidr = $plannedCidr;
+    $gateway = trim((string) (getenv('MCX_GATEWAY') ?: ''));
+} else {
+    [$cidr, $gateway] = gatherNetworkInformation();
+}
 $cidrValue = $cidr !== '' ? $cidr : '192.0.2.10/24';
 
 putenv('NETWORK_CIDR=' . $cidrValue);
@@ -61,7 +68,8 @@ putenv('GATEWAY=' . $gateway);
 $_ENV['NETWORK_CIDR'] = $cidrValue;
 $_ENV['GATEWAY'] = $gateway;
 
-$interface = Common::detectPrimaryInterface();
+// Named as the installed system will name it (net.ifnames=0 keeps eth<N>), not as the rescue system does.
+$interface = Common::installedPrimaryInterface();
 putenv('NETWORK_INTERFACE=' . $interface);
 $_ENV['NETWORK_INTERFACE'] = $interface;
 

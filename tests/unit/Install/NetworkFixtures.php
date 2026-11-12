@@ -211,6 +211,9 @@ final class NetworkWorld
             if ($argv[0] === 'dd') {
                 return $ok($sector);
             }
+            if ($argv[0] === 'mdadm') {
+                return $ok("MD_LEVEL=raid1\nMD_METADATA=0.90\n");
+            }
             return $ok('');
         });
     }

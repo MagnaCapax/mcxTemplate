@@ -140,11 +140,12 @@ final class LayoutPlannerTest extends TestCase
         $this->assertContains('--mount=/home,UUID=' . $home[7], $this->step($steps, 'configure')['argv']);
     }
 
-    public function testUsbLayoutBuildsMetadata12MirrorOnBothSticksAndInstallsGrubToBoth(): void
+    public function testUsbLayoutBuildsMetadata090MirrorOnBothSticksAndInstallsGrubToBoth(): void
     {
         $steps = $this->usbSteps();
         $create = $this->step($steps, 'mdCreate');
-        $this->assertSame(['mdadm', '--create', '/dev/md/mcxboot', '--run', '--level=1', '--raid-devices=2', '--metadata=1.2', '--name=mcxboot',
+        // 0.90, never 1.x: a v1.x superblock made by a rescue kernel newer than 6.18 is refused by older target kernels.
+        $this->assertSame(['mdadm', '--create', '/dev/md/mcxboot', '--run', '--level=1', '--raid-devices=2', '--metadata=0.90',
             '/dev/sda1', '/dev/sdb1'], $create['argv']);
         $this->assertSame(['boot0', 'boot1'], $create['roles']);
         $this->assertSame(['mkfs.ext4', '-F', '-L', 'boot', '-U', '00000000-0000-4000-8000-000000000001', '/dev/md/mcxboot'], $this->step($steps, 'mkfsBoot')['argv']);

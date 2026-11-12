@@ -40,7 +40,7 @@ A JSON file treated as untrusted input. `PlanValidator` checks every field again
 
 ### Layouts
 - `biosSingle`: MBR, `/boot` 1 GiB, swap 4 GiB, root over the rest; optional `homeSplit` makes root 100 GiB and adds a `/home` partition (`mkfs.ext4 -m 0 -L home`). The sizes of `/boot` and swap are this ADR's choice, not measured from an existing profile.
-- `biosNvmeUsbBoot`: two USB sticks hold `/boot` as an md RAID1 (metadata 1.2, a 2 GiB partition on each, GRUB to both); the large disk is GPT with swap and root. GPT on the large disk is a choice made here because it does not boot, so the 2 TiB MBR limit does not apply to it.
+- `biosNvmeUsbBoot`: two USB sticks hold `/boot` as an md RAID1 (metadata 0.90 since [ADR-0005](0005-boot-mirror-uses-md-metadata-0-90.md), first 1.2; a 2 GiB partition on each, GRUB to both); the large disk is GPT with swap and root. GPT on the large disk is a choice made here because it does not boot, so the 2 TiB MBR limit does not apply to it.
 - UEFI is out of scope.
 
 Filesystem and swap UUIDs are chosen before the first write (`mkfs -U`, `mkswap -U`), so the whole command list, including the fstab UUIDs, is known and printable in a dry run. `GRUB_TARGETS` is set to `/dev/disk/by-path/<udev ID_PATH>` of the boot disks, never `sda`/`sdb`. Wiping a disk zeroes its first 16 MiB and its last 16 MiB; the tail write seeks in bytes (`oflag=seek_bytes`, size minus 16 MiB), because disk sizes are rarely whole MiB.

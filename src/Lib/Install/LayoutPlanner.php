@@ -172,9 +172,13 @@ final class LayoutPlanner
         foreach ([0, 1] as $i) {
             $steps[] = self::step('wipeStickPart' . $i, ['wipefs', '-a', self::partName($sticks[$i]['path'], 1)], true, ['boot' . $i]);
         }
-        // Metadata 1.2 matches the existing fleet's boot arrays.
+        // Metadata 0.90, not 1.2: a kernel newer than 6.18 writes logical_block_size into the old pad3 bytes of every
+        // v1.x superblock it creates (linux 62ed1b582246, a4166f1c4893), and the target's older kernel then refuses the
+        // members ("does not have a valid v1.2 superblock"), so /boot never mounts and the first boot stops in
+        // emergency mode (seen on hardware, 2026-11-12). The 0.90 superblock has no such field and every kernel reads
+        // it. 0.90 stores no array name; the /dev/md/mcxboot path given here names the array instead. ADR-0005.
         $steps[] = self::step('mdCreate', ['mdadm', '--create', self::MD_BOOT, '--run', '--level=1', '--raid-devices=2',
-            '--metadata=1.2', '--name=mcxboot',
+            '--metadata=0.90',
             self::partName($sticks[0]['path'], 1), self::partName($sticks[1]['path'], 1)], true, ['boot0', 'boot1']);
         $steps[] = self::step('mkfsBoot', ['mkfs.ext4', '-F', '-L', 'boot', '-U', $uu['boot'], self::MD_BOOT], true, ['boot0', 'boot1']);
         $steps[] = self::step('mkswap', ['mkswap', '-U', $uu['swap'], self::partName($root['path'], 1)], true, ['root']);

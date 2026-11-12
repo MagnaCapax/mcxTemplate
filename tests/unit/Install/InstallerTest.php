@@ -111,6 +111,9 @@ final class InstallerTest extends TestCase
             if ($argv[0] === 'dd') {
                 return $ok($this->sector);
             }
+            if ($argv[0] === 'mdadm') {
+                return $ok("MD_LEVEL=raid1\nMD_METADATA=0.90\n");
+            }
             return $ok('');
         });
     }
@@ -289,7 +292,10 @@ final class InstallerTest extends TestCase
 
         // During execute the reader only re-reads identity and runs the read-only boot checks.
         foreach (array_slice($reader->argvs, $readsBefore) as $argv) {
-            $this->assertContains($argv[0], ['lsblk', 'udevadm', 'blkid', 'dd']);
+            $this->assertContains($argv[0], ['lsblk', 'udevadm', 'blkid', 'dd', 'mdadm']);
+            if ($argv[0] === 'mdadm') {
+                $this->assertSame(['mdadm', '--detail', '--export', '/dev/md/mcxboot'], $argv, 'the reader only describes the mirror');
+            }
             if ($argv[0] === 'dd') {
                 $this->assertSame([], preg_grep('/^of=/', $argv), 'the boot-code check only reads');
             }

@@ -8,8 +8,8 @@ namespace Lib\Install;
 // exit 0 (grub-install, update-initramfs, update-grub, the fstab helper, mdadm
 // capture), so an exit code alone cannot prove the node will boot (CWE-636).
 // Every check reads files under the target root or runs a read-only command
-// (blkid, dd of=-less read of one sector) through the READER runner. Any miss is
-// a verifyFailed refusal that names the check.
+// (blkid, dd of=-less read of one sector, mdadm --detail) through the READER runner.
+// Any miss is a verifyFailed refusal that names the check.
 final class BootVerifier
 {
     public const SECTOR = 512;
@@ -28,6 +28,7 @@ final class BootVerifier
         }
         if ($step['md'] === true) {
             self::mdadmConf($root);
+            self::bootArray($reader);
         }
     }
 
@@ -110,6 +111,19 @@ final class BootVerifier
         }
         if (substr($sector, 510, 2) !== "\x55\xAA" || strpos(substr($sector, 0, 446), 'GRUB ') === false) {
             self::fail('bootCode', 'a GRUB target has no GRUB boot code in its first sector');
+        }
+    }
+
+    /**
+     * bootArray: the /boot mirror carries metadata 0.90 (ADR-0005). The rescue kernel cannot show what the target's
+     * own, older kernel will accept: a 1.x superblock made by a kernel newer than 6.18 assembles here and is refused
+     * there, so the format is checked instead of an assemble test.
+     */
+    private static function bootArray(CommandRunner $reader): void
+    {
+        $detail = $reader->run(['mdadm', '--detail', '--export', '/dev/md/mcxboot']);
+        if ($detail['code'] !== 0 || preg_match('/^MD_METADATA=0\.90$/m', $detail['out']) !== 1) {
+            self::fail('bootArray', 'the /boot mirror does not carry metadata 0.90');
         }
     }
 

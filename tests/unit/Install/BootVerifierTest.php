@@ -17,6 +17,7 @@ final class BootVerifierTest extends TestCase
     private const STICK0 = '/dev/disk/by-path/pci-0000:00:14.0-usb-0:3:1.0-scsi-0:0:0:0';
     private const STICK1 = '/dev/disk/by-path/pci-0000:00:14.0-usb-0:4:1.0-scsi-0:0:0:0';
     private string $root = '';
+    private string $mdDetail = "MD_LEVEL=raid1\nMD_DEVICES=2\nMD_METADATA=0.90\nMD_UUID=01020304:05060708:090a0b0c:0d0e0f10\n";
 
     protected function setUp(): void
     {
@@ -28,7 +29,7 @@ final class BootVerifierTest extends TestCase
         file_put_contents($this->root . '/boot/grub/grub.cfg', "menuentry x {}\n");
         file_put_contents($this->root . '/etc/fstab', "# a comment UUID=ffffffff-0000-4000-8000-000000000009\n"
             . 'UUID=' . self::ROOT_UUID . " / ext4 defaults 0 1\nUUID=" . self::BOOT_UUID . " /boot ext4 defaults 0 2\nproc /proc proc defaults 0 0\n");
-        file_put_contents($this->root . '/etc/mdadm/mdadm.conf', "ARRAY /dev/md/mcxboot metadata=1.2 name=rescue:mcxboot UUID=1:2:3:4\n");
+        file_put_contents($this->root . '/etc/mdadm/mdadm.conf', "ARRAY /dev/md/mcxboot metadata=0.90 UUID=1:2:3:4\n");
     }
 
     protected function tearDown(): void
@@ -50,6 +51,7 @@ final class BootVerifierTest extends TestCase
     {
         $r = new RecordingRunner();
         $r->addResponse(['blkid'], $blkid);
+        $r->addResponse(['mdadm', '--detail'], $this->mdDetail);
         foreach ($sectors as $device => $bytes) {
             $r->addResponse(['dd', 'if=' . $device], $bytes);
         }
@@ -81,7 +83,30 @@ final class BootVerifierTest extends TestCase
         BootVerifier::verify($reader, $this->root, $this->step());
         $this->assertSame([['blkid', '-c', '/dev/null', '-o', 'value', '-s', 'UUID'],
             ['dd', 'if=' . self::STICK0, 'bs=512', 'count=1', 'status=none'],
-            ['dd', 'if=' . self::STICK1, 'bs=512', 'count=1', 'status=none']], $reader->argvList());
+            ['dd', 'if=' . self::STICK1, 'bs=512', 'count=1', 'status=none'],
+            ['mdadm', '--detail', '--export', '/dev/md/mcxboot']], $reader->argvList());
+    }
+
+    // A 1.2 mirror assembles under the rescue kernel and is refused by an older target kernel (ADR-0005).
+    public function testBootMirrorWithMetadata12IsRefused(): void
+    {
+        $this->mdDetail = "MD_LEVEL=raid1\nMD_DEVICES=2\nMD_METADATA=1.2\nMD_NAME=rescue:mcxboot\n";
+        $this->assertMiss('bootArray', $this->reader());
+    }
+
+    public function testBootMirrorThatMdadmCannotDescribeIsRefused(): void
+    {
+        $reader = new RecordingRunner([['prefix' => ['mdadm'], 'result' => ['code' => 1, 'out' => 'MD_METADATA=0.90', 'err' => '']]]);
+        $reader->addResponse(['blkid'], self::ROOT_UUID . "\n" . self::BOOT_UUID . "\n");
+        $reader->addResponse(['dd'], self::grubSector());
+        $this->assertMiss('bootArray', $reader);
+    }
+
+    public function testNoMirrorMeansNoMdadmRead(): void
+    {
+        $reader = $this->reader();
+        BootVerifier::verify($reader, $this->root, $this->step(false));
+        $this->assertSame([], array_filter($reader->argvList(), static fn (array $a): bool => $a[0] === 'mdadm'));
     }
 
     public function testMissingKernelIsRefused(): void

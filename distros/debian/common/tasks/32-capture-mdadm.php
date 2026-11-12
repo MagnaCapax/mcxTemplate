@@ -26,8 +26,29 @@ if (!is_string($output) || trim($output) === '') {
     exit(0);
 }
 
-$payload = rtrim($output) . PHP_EOL;
-if (@file_put_contents('/etc/mdadm/mdadm.conf', $payload) === false) {
+// The scan replaces only the ARRAY lines. Other lines already in the file (MAILADDR, PROGRAM, DEVICE, HOMEHOST)
+// stay. With neither MAILADDR nor PROGRAM, mdmonitor refuses to start ("No mail address or alert command"), so
+// the Debian package default MAILADDR root is added. MCX_TARGET_ROOT is a test seam; chroot runs have none.
+$root = rtrim((string) (getenv('MCX_TARGET_ROOT') ?: ''), '/');
+$file = $root . '/etc/mdadm/mdadm.conf';
+// A line starting with whitespace continues the line above it, so an old ARRAY line goes with its continuations.
+$kept = [];
+$inArray = false;
+foreach (preg_split('/\R/', (string) @file_get_contents($file)) ?: [] as $line) {
+    if (preg_match('/^ARRAY\s/', $line) === 1 || ($inArray && preg_match('/^\s/', $line) === 1)) {
+        $inArray = true;
+        continue;
+    }
+    $inArray = false;
+    if ($line !== '') {
+        $kept[] = $line;
+    }
+}
+if (preg_grep('/^\s*(MAILADDR|PROGRAM)\s/', $kept) === []) {
+    $kept[] = 'MAILADDR root';
+}
+$payload = implode(PHP_EOL, $kept) . PHP_EOL . rtrim($output) . PHP_EOL;
+if (@file_put_contents($file, $payload) === false) {
     Common::logWarn('Unable to write /etc/mdadm/mdadm.conf.');
     exit(0);
 }

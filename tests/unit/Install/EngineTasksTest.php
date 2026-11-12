@@ -16,6 +16,7 @@ final class EngineTasksTest extends TestCase
         'cleanup' => 'distros/debian/common/tasks/90-remove-engine.php',
         'netplan' => 'distros/ubuntu/common/tasks/22-render-netplan.php',
         'boot' => 'distros/debian/common/tasks/40-update-boot.php',
+        'mdadm' => 'distros/debian/common/tasks/32-capture-mdadm.php',
     ];
     private string $base = '';
     private string $root = '';
@@ -299,6 +300,54 @@ final class EngineTasksTest extends TestCase
         [$rc, $out] = $this->runTask('boot', $this->bootStubs(['update-initramfs' => 1, 'update-grub' => 1, 'grub-install' => 1]));
         $this->assertSame(0, $rc, $out);
         $this->assertStringContainsString('Task 40 complete', $out);
+    }
+
+    // mdadmRun puts an mdadm stub that prints one scan line on a private PATH, writes $existing as the target's
+    // mdadm.conf (null = no file) and runs task 32. Returns [exit code, output, resulting mdadm.conf].
+    /**
+     * @return array{0:int,1:string,2:string}
+     */
+    private function mdadmRun(?string $existing): array
+    {
+        $bin = $this->base . '/mdbin';
+        mkdir($bin, 0700, true);
+        file_put_contents($bin . '/mdadm', "#!/bin/sh\necho 'ARRAY /dev/md/mcxboot metadata=0.90 UUID=01234567:89abcdef:01234567:89abcdef'\n");
+        chmod($bin . '/mdadm', 0700);
+        mkdir($this->root . '/etc/mdadm', 0755, true);
+        if ($existing !== null) {
+            file_put_contents($this->root . '/etc/mdadm/mdadm.conf', $existing);
+        }
+        [$rc, $out] = $this->runTask('mdadm', ['PATH' => $bin . ':/bin:/usr/bin']);
+        return [$rc, $out, (string) @file_get_contents($this->root . '/etc/mdadm/mdadm.conf')];
+    }
+
+    public function testMdadmCaptureAddsMailaddrSoMdmonitorCanStart(): void
+    {
+        [$rc, $out, $conf] = $this->mdadmRun(null);
+        $this->assertSame(0, $rc, $out);
+        $this->assertSame("MAILADDR root\nARRAY /dev/md/mcxboot metadata=0.90 UUID=01234567:89abcdef:01234567:89abcdef\n", $conf);
+    }
+
+    public function testMdadmCaptureKeepsExistingSettingsAndReplacesOnlyArrayLines(): void
+    {
+        [$rc, $out, $conf] = $this->mdadmRun("HOMEHOST <system>\nMAILADDR ops@example.org\nARRAY /dev/md/old metadata=1.2 UUID=ffffffff:ffffffff:ffffffff:ffffffff\n");
+        $this->assertSame(0, $rc, $out);
+        $this->assertSame("HOMEHOST <system>\nMAILADDR ops@example.org\nARRAY /dev/md/mcxboot metadata=0.90 UUID=01234567:89abcdef:01234567:89abcdef\n", $conf);
+    }
+
+    public function testMdadmCaptureDropsTheContinuationLinesOfAnOldArray(): void
+    {
+        [$rc, $out, $conf] = $this->mdadmRun("ARRAY /dev/md/old metadata=1.2\n   UUID=ffffffff:ffffffff:ffffffff:ffffffff\nMAILADDR root\n");
+        $this->assertSame(0, $rc, $out);
+        $this->assertSame("MAILADDR root\nARRAY /dev/md/mcxboot metadata=0.90 UUID=01234567:89abcdef:01234567:89abcdef\n", $conf);
+    }
+
+    public function testMdadmCaptureKeepsAProgramAlertWithoutAddingMailaddr(): void
+    {
+        [$rc, $out, $conf] = $this->mdadmRun("PROGRAM /usr/local/sbin/md-alert\n");
+        $this->assertSame(0, $rc, $out);
+        $this->assertStringNotContainsString('MAILADDR', $conf);
+        $this->assertStringStartsWith("PROGRAM /usr/local/sbin/md-alert\nARRAY /dev/md/mcxboot", $conf);
     }
 
     public function testBootTaskSucceedsInStrictModeWhenEveryCommandSucceeds(): void

@@ -33,8 +33,9 @@ function usage(int $code): int
         . "  --api-url       nodeCore base URL written into the bootstrap\n"
         . "  --artifact-base https base URL (no trailing slash) the artifacts will be published under\n"
         . "  --unsafe-allow-non-root  test builds only: file owners in the archive will be wrong\n"
-        . "Refuses a dirty engine repository and a rootfs holding private keys (other than SSH host keys),\n"
-        . "authorized_keys files, or an unlocked root password. Prints the mcxSha256 pin of the bootstrap.\n");
+        . "Refuses a dirty engine repository and a rootfs holding private key blocks (other than SSH host keys),\n"
+        . "authorized_keys files, or an unlocked root password. A known-public package key fixture does not\n"
+        . "refuse; it is printed as NOTICE publicFixture <path> on stderr. Prints the mcxSha256 pin of the bootstrap.\n");
     return $code;
 }
 
@@ -62,6 +63,9 @@ if (in_array('', $want, true)) {
 try {
     $builder = new ReleaseBuilder(new ProcessRunner(), dirname(__DIR__), function_exists('posix_geteuid') && posix_geteuid() === 0, $unsafe);
     $r = $builder->build($want['rootfs'], $want['name'], $want['version'], $want['out'], $want['api-url'], $want['artifact-base']);
+    foreach ($r['scanNotices'] as $notice) {
+        fwrite(STDERR, 'NOTICE ' . $notice . "\n"); // reported, not refused (ContentScan::NOTICE_CODES)
+    }
     echo "template=" . $r['template'] . "\ntemplateSha256=" . $r['sha256'] . "\ntemplateSizeBytes=" . $r['manifest']['sizeBytes'] . "\n"
         . "engine=" . $r['engine'] . "\nengineSha256=" . $r['engineSha256'] . "\n"
         . "bootstrap=" . $r['bootstrap'] . "\nmcxSha256=" . $r['bootstrapSha256'] . "\n";

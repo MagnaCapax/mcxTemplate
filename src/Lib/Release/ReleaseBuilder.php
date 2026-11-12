@@ -17,6 +17,7 @@ use Lib\Provisioning\Common;
 // tools: tools/templateRehydrate.php and tools/check-template.php run unchanged. It refuses a dirty
 // engine repository, a rootfs that fails ContentScan, and (unless told otherwise) a non-root run:
 // the rehydrate step extracts the rootfs with tar, and only root keeps the file owners.
+// ContentScan notices (a known-public package key fixture) do not refuse; they come back as scanNotices.
 final class ReleaseBuilder
 {
     // Installer files the node needs: the entry point, its library and the layout auditor ArchiveCheck calls.
@@ -44,17 +45,18 @@ final class ReleaseBuilder
     }
 
     /**
-     * @return array{template:string,sha256:string,manifest:array<string,mixed>,engine:string,engineSha256:string,bootstrap:string,bootstrapSha256:string}
+     * @return array{template:string,sha256:string,manifest:array<string,mixed>,engine:string,engineSha256:string,bootstrap:string,bootstrapSha256:string,scanNotices:string[]}
      */
     public function build(string $rootfs, string $name, string $version, string $out, string $apiUrl, string $artifactBase): array
     {
         $this->checkInputs($rootfs, $name, $version, $out, $apiUrl, $artifactBase);
         $commit = $this->cleanHead();
-        $findings = ContentScan::scan($rootfs);
-        if ($findings !== []) {
-            $list = implode(', ', array_map(static fn (array $f): string => $f['code'] . ($f['path'] !== '' ? ' ' . $f['path'] : ''), $findings));
-            throw new InstallRefusal('contentScanRefused', $list);
+        [$refusals, $notices] = ContentScan::partition(ContentScan::scan($rootfs));
+        $describe = static fn (array $f): string => $f['code'] . ($f['path'] !== '' ? ' ' . $f['path'] : '');
+        if ($refusals !== []) {
+            throw new InstallRefusal('contentScanRefused', implode(', ', array_map($describe, $refusals)));
         }
+        $scanNotices = array_map($describe, $notices);
 
         if (!@mkdir($out, 0755, true) && !is_dir($out)) {
             throw new InstallRefusal('outputDirFailed', 'the output directory could not be created');
@@ -102,7 +104,8 @@ final class ReleaseBuilder
             @rmdir($work);
         }
         return ['template' => $template, 'sha256' => $sha, 'manifest' => $manifest, 'engine' => $out . '/' . $engineFile,
-            'engineSha256' => $engineSha, 'bootstrap' => $out . '/mcxInstall.sh', 'bootstrapSha256' => (string) hash_file('sha256', $out . '/mcxInstall.sh')];
+            'engineSha256' => $engineSha, 'bootstrap' => $out . '/mcxInstall.sh', 'bootstrapSha256' => (string) hash_file('sha256', $out . '/mcxInstall.sh'),
+            'scanNotices' => $scanNotices];
     }
 
     private function checkInputs(string $rootfs, string $name, string $version, string $out, string $apiUrl, string $artifactBase): void

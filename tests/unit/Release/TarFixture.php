@@ -59,10 +59,17 @@ final class TarFixture
         return substr($h, 0, 148) . sprintf('%06o', $sum) . "\0 " . substr($h, 156);
     }
 
-    // pem builds a PEM-style private key header; written in pieces so the file holds no key-shaped literal.
-    public static function pem(string $kind): string
+    // keyLine builds the BEGIN or END line of a private key block ($kind '' is PKCS#8, 'PGP' adds ' BLOCK');
+    // written in pieces so the file holds no key-shaped literal.
+    public static function keyLine(string $edge, string $kind): string
     {
-        return '-----' . 'BEGIN ' . $kind . ' PRIVATE KEY' . ($kind === 'PGP' ? ' BLOCK' : '') . '-----' . "\nAAAA\n";
+        return '-----' . $edge . ' ' . ($kind === '' ? '' : $kind . ' ') . 'PRIVATE KEY' . ($kind === 'PGP' ? ' BLOCK' : '') . '-----';
+    }
+
+    // pem builds a complete private key block with an obviously fake body (never key material).
+    public static function pem(string $kind, string $body = "AAAA\n"): string
+    {
+        return self::keyLine('BEGIN', $kind) . "\n" . $body . self::keyLine('END', $kind) . "\n";
     }
 
     public static function pad(string $data): string

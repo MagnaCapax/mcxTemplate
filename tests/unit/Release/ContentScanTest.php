@@ -74,6 +74,81 @@ final class ContentScanTest extends TestCase
         $this->assertSame([$code . ' ' . $name], $found);
     }
 
+    /** @return array<string,array{0:string}> content that names a private key type but holds no complete block */
+    public static function bareHeaders(): array
+    {
+        $begin = TarFixture::keyLine('BEGIN', '');
+        return [
+            // shared-mime-info magic: the header text cut short, inside binary bytes, no END line
+            'file-type magic signature' => ["\0\0\x01" . '-----' . 'BEGIN PGP PRIVATE KEY BLOC' . "\0\x02\0"],
+            'a header line with no END line' => [$begin . "\nAAAABBBB\n"],
+            'a key split across string literals in program source' => ["k.load(\n\t'" . $begin . "\\n'\n\t'AAAABBBBCCCC\\n'\n\t'"
+                . TarFixture::keyLine('END', '') . "\\n')\n"],
+            'an END line of another type' => [$begin . "\nAAAA\n" . TarFixture::keyLine('END', 'RSA') . "\n"],
+            'header and END with no body' => [$begin . "\n\n" . TarFixture::keyLine('END', '') . "\n"],
+        ];
+    }
+
+    /** @dataProvider bareHeaders */
+    public function testAHeaderWithoutACompleteBlockIsNotAPrivateKey(string $content): void
+    {
+        $this->assertSame([], $this->codes([['etc/shadow', self::LOCKED_SHADOW], ['usr/share/mime/magic', $content]]));
+    }
+
+    /** @return array<string,array{0:string,1:string}> path, content: complete blocks in many spellings and places */
+    public static function completeBlocks(): array
+    {
+        $pycache = 'usr/lib/x/tests/__pycache__/x.pyc';
+        $pkcs8 = TarFixture::pem('');
+        return [
+            'pkcs8 in a pycache file' => [$pycache, "\xe3\0\0\0\xf1" . $pkcs8 . ")\x06"],
+            'openssh in a pycache file' => [$pycache, "\xe3\0" . TarFixture::pem('OPENSSH') . "\0"],
+            'pgp in a pycache file' => [$pycache, "\xe3\0" . TarFixture::pem('PGP', "Version: x\n\nAAAA\n=AbCd\n") . "\0"],
+            'rsa under a tests directory' => ['usr/share/doc/x/tests/fixture.pem', TarFixture::pem('RSA')],
+            'ec under usr' => ['usr/lib/x/k.pem', TarFixture::pem('EC')],
+            'crlf line endings' => ['srv/crlf', str_replace("\n", "\r\n", $pkcs8)],
+            'json string escapes' => ['srv/c.json', '{"k":"' . str_replace("\n", '\\n', $pkcs8) . '"}'],
+            'one line with spaces for newlines' => ['srv/.env', 'KEY=' . str_replace("\n", ' ', $pkcs8)],
+            'indented and commented out' => ['etc/x.conf', '# ' . str_replace("\n", "\n# ", rtrim($pkcs8)) . "\n"],
+            'a real header after a bare one' => ['srv/two', TarFixture::keyLine('BEGIN', '') . " text\n" . $pkcs8],
+        ];
+    }
+
+    /** @dataProvider completeBlocks */
+    public function testACompleteBlockIsRefusedWhereverItSitsAndHoweverItIsSpelled(string $name, string $content): void
+    {
+        $this->assertSame(['privateKey ' . $name], $this->codes([['etc/shadow', self::LOCKED_SHADOW], [$name, $content]]));
+    }
+
+    public function testAKnownPublicBlockIsReportedAsANoticeAndDoesNotRefuse(): void
+    {
+        // A fake block stands in for a published fixture: for plain LF text the normalised form is the text itself.
+        $fixture = TarFixture::pem('', "AAAAfakePublicFixture\n");
+        $public = [hash('sha256', $fixture) => 'test: a fake public fixture'];
+        $pyc = 'usr/lib/x/tests/__pycache__/t.pyc';
+        $file = TarFixture::write($this->dir . '/f.tar.gz', [['./etc/shadow', self::LOCKED_SHADOW], ['./' . $pyc, "\xe3\0" . $fixture . "\0"],
+            ['srv/same.json', '"' . str_replace("\n", '\\r\\n', $fixture) . '"'], ['srv/both', $fixture . TarFixture::pem('')],
+            ['srv/other', TarFixture::pem('', "AAAAfakePublicFixturf\n")]]);
+        $found = ContentScan::scan($file, $public);
+        $this->assertSame([['code' => 'publicFixture', 'path' => $pyc], ['code' => 'publicFixture', 'path' => 'srv/same.json'],
+            ['code' => 'privateKey', 'path' => 'srv/both'], ['code' => 'privateKey', 'path' => 'srv/other']], $found);
+        [$refusals, $notices] = ContentScan::partition($found);
+        $this->assertSame(['srv/both', 'srv/other'], array_column($refusals, 'path'));
+        $this->assertSame([$pyc, 'srv/same.json'], array_column($notices, 'path'));
+        // The committed list is used when none is passed: the fake fixture is not on it.
+        $this->assertSame(['privateKey ' . $pyc], $this->codes([['etc/shadow', self::LOCKED_SHADOW], [$pyc, $fixture]]));
+    }
+
+    public function testDotSlashPrefixedPathsKeepTheHostKeyAndShadowRules(): void
+    {
+        $this->assertSame([], $this->codes([['./etc/shadow', self::LOCKED_SHADOW], ['./etc/ssh/ssh_host_ed25519_key', TarFixture::pem('OPENSSH')],
+            ['./etc/ssh/ssh_host_rsa_key', TarFixture::pem('RSA')]]));
+        $this->assertSame(['privateKey root/.ssh/id_ed25519', 'rootPassword etc/shadow'], $this->codes([['./etc/shadow', "root:\$6\$x\$y:1:::::\n"],
+            ['./root/.ssh/id_ed25519', TarFixture::pem('OPENSSH')], ['./etc/ssh/ssh_host_rsa_key.bak', 'no key here']]));
+        $this->assertSame(['privateKey etc/ssh/ssh_host_rsa_key.bak'], $this->codes([['./etc/shadow', self::LOCKED_SHADOW],
+            ['./etc/ssh/ssh_host_rsa_key.bak', TarFixture::pem('RSA')]]));
+    }
+
     public function testPublicKeysAndCertificatesAreNotPrivateKeys(): void
     {
         $this->assertSame([], $this->codes([['etc/shadow', self::LOCKED_SHADOW], ['etc/ssl/certs/a.pem', '-----' . "BEGIN CERTIFICATE-----\nx\n"],

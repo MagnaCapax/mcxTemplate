@@ -6,25 +6,34 @@ namespace Lib\Release;
 // ContentScan reads a captured root filesystem archive (tar.gz) ONCE, as a stream, and reports
 // what must never be baked into a template that is installed on many machines:
 //   authorizedKeys  any file named authorized_keys / authorized_keys2 (whatever it holds),
-//   privateKey      a private key (PEM/OpenSSH/PGP block) anywhere except the SSH host keys
-//                   etc/ssh/ssh_host_*_key, which the configure tasks reset at install time,
+//   privateKey      a complete private key block (PEM/OpenSSH/PGP: BEGIN line, body, END line of the
+//                   same type; PrivateKeyBlock says exactly what counts) anywhere except the SSH host
+//                   keys etc/ssh/ssh_host_*_key, which the configure tasks reset at install time,
+//   publicFixture   NOT a refusal: the file's only key blocks are known-public ones (a published package
+//                   test fixture, listed by hash in PrivateKeyBlock::PUBLIC). It is reported so the
+//                   release prints it; any other key block in the same file makes it privateKey,
 //   rootPassword    etc/shadow whose root entry is not locked (no password hash prefix "!" or "*"),
 //   shadowMissing   no etc/shadow in the archive at all (the root entry cannot be checked),
 //   archiveMalformed the stream is not a tar this scanner can read to its end.
+// A bare header string (no END line) is not a key. Member paths are compared without a leading "./" or "/".
 // It never extracts anything and returns paths and codes only, never file content.
 final class ContentScan
 {
     // Keys are small; a bigger file is not read for content (it is skipped over).
     private const MAX_CONTENT = 262144;
     private const BLOCK = 512;
-    private const KEY_MARK = '/-----BEGIN [A-Z0-9 ]*PRIVATE KEY/';
     private const HOST_KEY = '#^etc/ssh/ssh_host_[a-z0-9_]+_key$#D';
+    // Codes that are reported but do not refuse a release.
+    public const NOTICE_CODES = ['publicFixture'];
 
     /**
+     * @param array<string,string>|null $publicBlocks known-public key blocks (sha256 => source); null means
+     *                                                PrivateKeyBlock::PUBLIC (tests pass their own list)
      * @return array<int,array{code:string,path:string}> empty when the archive is clean
      */
-    public static function scan(string $archive): array
+    public static function scan(string $archive, ?array $publicBlocks = null): array
     {
+        $publicBlocks = $publicBlocks ?? PrivateKeyBlock::PUBLIC;
         $gz = @gzopen($archive, 'rb');
         if ($gz === false) {
             return [['code' => 'archiveMalformed', 'path' => '']];
@@ -70,8 +79,14 @@ final class ContentScan
                 }
                 if ($isFile && $size > 0 && $size <= self::MAX_CONTENT) {
                     $data = self::readData($gz, $size, true);
-                    if (preg_match(self::KEY_MARK, $data) === 1 && preg_match(self::HOST_KEY, $path) !== 1) {
-                        $findings[] = ['code' => 'privateKey', 'path' => $path];
+                    if (preg_match(self::HOST_KEY, $path) !== 1) {
+                        // Every complete block counts; one that is not known public makes the file a privateKey.
+                        [$known, $other] = PrivateKeyBlock::classify(PrivateKeyBlock::find($data), $publicBlocks);
+                        if ($other > 0) {
+                            $findings[] = ['code' => 'privateKey', 'path' => $path];
+                        } elseif ($known > 0) {
+                            $findings[] = ['code' => 'publicFixture', 'path' => $path];
+                        }
                     }
                     if ($path === 'etc/shadow') {
                         $shadowSeen = true;
@@ -96,6 +111,25 @@ final class ContentScan
             $findings[] = ['code' => 'shadowMissing', 'path' => 'etc/shadow'];
         }
         return $findings;
+    }
+
+    /**
+     * Split findings into those that refuse a release and the notices (NOTICE_CODES) that do not.
+     *
+     * @param array<int,array{code:string,path:string}> $findings
+     * @return array{0:array<int,array{code:string,path:string}>,1:array<int,array{code:string,path:string}>}
+     */
+    public static function partition(array $findings): array
+    {
+        $refusals = $notices = [];
+        foreach ($findings as $f) {
+            if (in_array($f['code'], self::NOTICE_CODES, true)) {
+                $notices[] = $f;
+            } else {
+                $refusals[] = $f;
+            }
+        }
+        return [$refusals, $notices];
     }
 
     // rootLocked: the root line's password field must start with "!" or "*" (locked); empty or a hash is not locked.

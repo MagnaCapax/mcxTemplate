@@ -15,7 +15,8 @@ crafting new templates.
 * `templateAssemble.php` – Stage a remote system into a local workspace,
   bundle the templating engine (rehydration), and package the combination as a template.
 * `check-template.php` – Audit a template directory or tarball and flag missing
-  distro assets before deployment.
+  distro assets before deployment. It also exits 3 when the rootfs dpkg database
+  has `fail2ban`, `ufw`, `crowdsec` or `sshguard` installed (ADR-0006).
 * `lib/packageCommon.php` – Internal helper library shared by the tooling. You
   rarely invoke it directly, but all scripts depend on its checks and
   path-handling helpers.

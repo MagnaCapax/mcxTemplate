@@ -34,7 +34,7 @@ function usage(int $code): int
         . "  --artifact-base https base URL (no trailing slash) the artifacts will be published under\n"
         . "  --unsafe-allow-non-root  test builds only: file owners in the archive will be wrong\n"
         . "Refuses a dirty engine repository and a rootfs holding private key blocks (other than SSH host keys),\n"
-        . "authorized_keys files, or an unlocked root password. A known-public package key fixture does not\n"
+        . "authorized_keys files, an unlocked root password, or an installed fail2ban, ufw, crowdsec or sshguard package (ADR-0006). A known-public package key fixture does not\n"
         . "refuse; it is printed as NOTICE publicFixture <path> on stderr. Prints the mcxSha256 pin of the bootstrap.\n");
     return $code;
 }

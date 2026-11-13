@@ -93,6 +93,28 @@ final class ReleaseBuilderTest extends TestCase
         $this->assertSame(['status', 'rev-parse'], $programs, 'no export, rehydrate or archive step ran');
     }
 
+    public function testARootfsWithABannedPackageInstalledIsRefusedAndNothingIsWritten(): void
+    {
+        $runner = $this->cleanGit();
+        $status = "Package: bash\nStatus: install ok installed\n\nPackage: fail2ban\nStatus: install ok installed\n\nPackage: ufw\nStatus: install ok installed\n\n";
+        $result = $this->code(new ReleaseBuilder($runner, '/repo', true), $this->rootfs([['var/lib/dpkg/status', $status]]), $this->dir . '/out');
+        $this->assertStringStartsWith('contentScanRefused', $result);
+        $this->assertStringContainsString('bannedPackage fail2ban', $result);
+        $this->assertStringContainsString('bannedPackage ufw', $result);
+        $this->assertStringNotContainsString('bannedPackage bash', $result);
+        $this->assertDirectoryDoesNotExist($this->dir . '/out');
+        $this->assertCount(2, $runner->calls(), 'only git status and rev-parse ran: no export, rehydrate or archive step');
+    }
+
+    public function testARootfsWithTheBannedPackagesRemovedIsNotRefusedByTheScan(): void
+    {
+        $runner = $this->cleanGit();
+        $status = "Package: fail2ban\nStatus: deinstall ok config-files\n\nPackage: ufw\nStatus: purge ok not-installed\n\n";
+        $result = $this->code(new ReleaseBuilder($runner, '/repo', true), $this->rootfs([['var/lib/dpkg/status', $status]]), $this->dir . '/out');
+        $this->assertStringNotContainsString('contentScanRefused', $result);
+        $this->assertStringNotContainsString('bannedPackage', $result);
+    }
+
     /** @return array<string,array{0:array<string,string>}> */
     public static function badInputs(): array
     {

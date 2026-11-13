@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace Lib\Release;
 
+use Lib\Install\BannedPackages;
+
 // ContentScan reads a captured root filesystem archive (tar.gz) ONCE, as a stream, and reports
 // what must never be baked into a template that is installed on many machines:
 //   authorizedKeys  any file named authorized_keys / authorized_keys2 (whatever it holds),
@@ -14,6 +16,9 @@ namespace Lib\Release;
 //                   release prints it; any other key block in the same file makes it privateKey,
 //   rootPassword    etc/shadow whose root entry is not locked (no password hash prefix "!" or "*"),
 //   shadowMissing   no etc/shadow in the archive at all (the root entry cannot be checked),
+//   bannedPackage   a package from BannedPackages::NAMES is installed according to var/lib/dpkg/status; the
+//                   finding's path is the package name (docs/adr/0006),
+//   dpkgStatusUnreadable  var/lib/dpkg/status is larger than BannedPackages::STATUS_MAX, so it was not read,
 //   archiveMalformed the stream is not a tar this scanner can read to its end.
 // A bare header string (no END line) is not a key. Member paths are compared without a leading "./" or "/".
 // It never extracts anything and returns paths and codes only, never file content.
@@ -77,9 +82,17 @@ final class ContentScan
                 if ($base === 'authorized_keys' || $base === 'authorized_keys2') {
                     $findings[] = ['code' => 'authorizedKeys', 'path' => $path];
                 }
-                if ($isFile && $size > 0 && $size <= self::MAX_CONTENT) {
+                $isStatus = $isFile && $path === BannedPackages::STATUS_MEMBER;
+                // The dpkg status file is read up to its own, larger limit; key blocks are still looked for only in small files.
+                $limit = $isStatus ? BannedPackages::STATUS_MAX : self::MAX_CONTENT;
+                if ($isFile && $size > 0 && $size <= $limit) {
                     $data = self::readData($gz, $size, true);
-                    if (preg_match(self::HOST_KEY, $path) !== 1) {
+                    if ($isStatus) {
+                        foreach (BannedPackages::installed($data) as $package) {
+                            $findings[] = ['code' => 'bannedPackage', 'path' => $package];
+                        }
+                    }
+                    if ($size <= self::MAX_CONTENT && preg_match(self::HOST_KEY, $path) !== 1) {
                         // Every complete block counts; one that is not known public makes the file a privateKey.
                         [$known, $other] = PrivateKeyBlock::classify(PrivateKeyBlock::find($data), $publicBlocks);
                         if ($other > 0) {
@@ -95,6 +108,9 @@ final class ContentScan
                         }
                     }
                 } else {
+                    if ($isStatus && $size > $limit) {
+                        $findings[] = ['code' => 'dpkgStatusUnreadable', 'path' => $path]; // cannot prove no banned package is in it
+                    }
                     if ($isFile && $path === 'etc/shadow') {
                         $shadowSeen = true;
                         $findings[] = ['code' => 'rootPassword', 'path' => $path]; // unreadable size: cannot prove it is locked

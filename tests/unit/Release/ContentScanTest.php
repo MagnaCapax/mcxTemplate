@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Release;
 
+use Lib\Install\BannedPackages;
 use Lib\Release\ContentScan;
 use PHPUnit\Framework\TestCase;
 
@@ -242,5 +243,50 @@ final class ContentScanTest extends TestCase
     {
         $found = $this->scan([['etc/shadow', self::LOCKED_SHADOW], ['root/id', TarFixture::pem('OPENSSH')]]);
         $this->assertStringNotContainsString('AAAA', json_encode($found));
+    }
+
+    // dpkgStatus builds a dpkg status file: one stanza per [package, "Status" value].
+    private static function dpkgStatus(array $packages): string
+    {
+        $out = '';
+        foreach ($packages as [$name, $state]) {
+            $out .= "Package: $name\nStatus: $state\nArchitecture: all\n\n";
+        }
+        return $out;
+    }
+
+    public function testAnInstalledBannedPackageIsRefusedByName(): void
+    {
+        $status = self::dpkgStatus([['bash', 'install ok installed'], ['fail2ban', 'install ok installed'], ['ufw', 'install ok installed']]);
+        $this->assertSame(['bannedPackage fail2ban', 'bannedPackage ufw'],
+            $this->codes([['etc/shadow', self::LOCKED_SHADOW], ['var/lib/dpkg/status', $status]]));
+        [$refusals, $notices] = ContentScan::partition($this->scan([['etc/shadow', self::LOCKED_SHADOW], ['var/lib/dpkg/status', $status]]));
+        $this->assertSame(['fail2ban', 'ufw'], array_column($refusals, 'path'), 'banned packages refuse, they are not notices');
+        $this->assertSame([], $notices);
+    }
+
+    public function testRemovedPackagesCleanAndAbsentStatusFilesPass(): void
+    {
+        $removed = self::dpkgStatus([['fail2ban', 'deinstall ok config-files'], ['ufw', 'purge ok not-installed'], ['bash', 'install ok installed']]);
+        $this->assertSame([], $this->codes([['etc/shadow', self::LOCKED_SHADOW], ['var/lib/dpkg/status', $removed]]));
+        $this->assertSame([], $this->codes([['etc/shadow', self::LOCKED_SHADOW], ['var/lib/dpkg/status', self::dpkgStatus([['bash', 'install ok installed']])]]));
+        $this->assertSame([], $this->codes([['etc/shadow', self::LOCKED_SHADOW]]), 'no dpkg database: nothing is installed by dpkg');
+    }
+
+    public function testOnlyTheRootStatusFileCountsAndItIsReadPastTheKeyScanSizeLimit(): void
+    {
+        $banned = self::dpkgStatus([['crowdsec', 'install ok installed']]);
+        // A copy elsewhere in the tree (a backup, a package's test data) is not the database.
+        $this->assertSame([], $this->codes([['etc/shadow', self::LOCKED_SHADOW], ['usr/share/doc/x/status', $banned], ['var/lib/dpkg/status-old', $banned]]));
+        // The real database is bigger than the 256 KiB the key scan reads; the banned stanza sits at its end.
+        $big = str_repeat(self::dpkgStatus([['bash', 'install ok installed']]), 15000) . $banned;
+        $this->assertGreaterThan(262144, strlen($big));
+        $this->assertSame(['bannedPackage crowdsec'], $this->codes([['etc/shadow', self::LOCKED_SHADOW], ['var/lib/dpkg/status', $big]]));
+    }
+
+    public function testAStatusFileTooLargeToReadIsRefused(): void
+    {
+        $huge = str_repeat('x', BannedPackages::STATUS_MAX + 1);
+        $this->assertSame(['dpkgStatusUnreadable var/lib/dpkg/status'], $this->codes([['etc/shadow', self::LOCKED_SHADOW], ['var/lib/dpkg/status', $huge]]));
     }
 }

@@ -187,6 +187,20 @@ final class ArchiveCheckTest extends TestCase
         $this->assertCode('templateAuditFailed', fn () => ArchiveCheck::checkLayout($runner, '/run/t.tar.gz'));
     }
 
+    public function testABannedPackageInTheAuditIsItsOwnNamedRefusal(): void
+    {
+        $runner = new RecordingRunner();
+        $runner->addResponse(['tar', '-tzf'], implode("\n", self::GOOD) . "\n");
+        $runner->addResponse([PHP_BINARY], "Template audit results:\n  BANNED   banned package fail2ban\nbannedPackage: fail2ban, ufw\n", 3);
+        try {
+            ArchiveCheck::checkLayout($runner, '/run/t.tar.gz');
+            $this->fail('a banned package must refuse');
+        } catch (InstallRefusal $e) {
+            $this->assertSame('bannedPackage', $e->refusalCode());
+            $this->assertStringContainsString('fail2ban, ufw', $e->getMessage());
+        }
+    }
+
     public function testUnreadableArchiveListingIsRefused(): void
     {
         $runner = new RecordingRunner();

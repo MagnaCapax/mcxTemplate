@@ -26,12 +26,8 @@ final class PrivateKeyBlock
     // Add an entry only for a key its upstream publishes on purpose (a test fixture or an example), with the
     // package and file named, after checking the block in that package. Never add a key a capture produced,
     // and never exempt by path: the same bytes anywhere else are exempt, a different key anywhere is not.
-    public const PUBLIC = [
-        // fail2ban 1.1.0-8 (Debian 13): the test key in fail2ban/tests/action_d/test_smtp.py, which the .py splits
-        // across string literals and py3compile joins into __pycache__/test_smtp.cpython-313.pyc at install time.
-        // Hash checked 2026-11-12 on the debian-13 base rootfs capture and on a separately installed copy.
-        '9b8842459141a13fd3563421f2ed1602a6457e1fff3af0b15761ea51260260a8' => 'fail2ban tests/action_d/test_smtp.py fixture',
-    ];
+    // Empty since ADR-0006: the one entry (a fail2ban package test key) is gone because templates no longer ship fail2ban.
+    public const PUBLIC = [];
 
     /**
      * Every complete block in $data, each normalised.

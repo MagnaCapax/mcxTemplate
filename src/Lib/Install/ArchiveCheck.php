@@ -6,7 +6,8 @@ namespace Lib\Install;
 // ArchiveCheck verifies the template BEFORE any wipe, so a bad artifact never
 // costs a working disk: size and sha256 against the plan, then the archive
 // layout (everything under rootfs/, no path traversal, os-release and the
-// embedded engine present), then the existing tools/check-template.php audit.
+// embedded engine present), then the existing tools/check-template.php audit,
+// which also refuses a template with a banned package installed (BannedPackages).
 //
 // stage() closes the check-then-use gap (CWE-367): an execute run copies the
 // template once into a fresh mode-0700 directory, hashing while it copies, and
@@ -208,6 +209,11 @@ final class ArchiveCheck
 
         $tool = dirname(__DIR__, 3) . '/tools/check-template.php';
         $audit = $runner->run([PHP_BINARY, $tool, '--path=' . $path, '--tar']);
+        // Exit 3 is a banned package (docs/adr/0006); the auditor's last line names the packages.
+        if ($audit['code'] === 3) {
+            $named = preg_match('/^bannedPackage: ([A-Za-z0-9.+, -]{1,200})$/m', $audit['out'], $m) === 1 ? $m[1] : 'see the audit output';
+            throw new InstallRefusal('bannedPackage', 'the template installs a package PM does not ship: ' . $named);
+        }
         if ($audit['code'] !== 0) {
             throw new InstallRefusal('templateAuditFailed', 'tools/check-template.php reported missing parts');
         }

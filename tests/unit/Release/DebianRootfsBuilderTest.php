@@ -111,7 +111,7 @@ final class DebianRootfsBuilderTest extends TestCase
         }
         $packages = DebianRootfsBuilder::readPackageList((string) file_get_contents(self::LIST));
         $this->assertCount(count($lines), $packages);
-        foreach (['linux-image-amd64', 'grub-pc', 'mdadm', 'openssh-server', 'php-cli', 'ifupdown', 'iproute2'] as $needed) {
+        foreach (['linux-image-amd64', 'grub-pc', 'mdadm', 'openssh-server', 'php-cli', 'ifupdown', 'iproute2', 'dbus', 'systemd-timesyncd', 'cron'] as $needed) {
             $this->assertArrayHasKey($needed, $packages);
         }
     }

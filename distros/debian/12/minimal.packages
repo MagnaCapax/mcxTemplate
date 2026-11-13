@@ -1,8 +1,9 @@
 # Debian 12 (bookworm) minimal template: the packages tools/templateBuildDebian.php adds to
 # mmdebstrap's minbase variant (essential + Priority required + apt). Recommends are not installed.
-# Every line names the code that needs the package; a line without "# needed by" is refused.
+# Every line names what needs the package (install engine code, or the installed server itself);
+# a line without "# needed by" is refused.
 # Packages already in minbase are listed only when the engine calls them directly (passwd).
-# Banned packages (src/Lib/Release/BannedPackages.php) are refused here and in the built image.
+# Banned packages (src/Lib/Install/BannedPackages.php) are refused here and in the built image.
 linux-image-amd64  # needed by BootVerifier::kernel (/boot/vmlinuz-* with initrd.img) and task 40 update-initramfs
 initramfs-tools    # needed by task 40 (update-initramfs -u) and BootVerifier::kernel (non-empty initrd.img)
 grub-pc            # needed by task 40 (update-grub, grub-install on GRUB_TARGETS), BootVerifier grubConfig and bootCode; LayoutPlanner is BIOS/MBR only
@@ -17,3 +18,6 @@ kmod               # needed by booting: loading the disk, md and NIC modules the
 e2fsprogs          # needed by the ext4 filesystems in the fstab task 30 writes (fsck.ext4 for pass 1 and 2 at boot)
 openssh-server     # needed by task 13 (ssh-keygen -A, from its dependency openssh-client) and root password login over SSH after install
 ca-certificates    # needed by tasks 24 and 26 when given https URIs (PHP verifies TLS against the system CA bundle)
+dbus               # needed by the installed server: systemd-logind (power button, sessions), hostnamectl, timedatectl and systemctl poweroff talk over the system bus
+systemd-timesyncd  # needed by the installed server: a synced clock for TLS certificate validity (ca-certificates) and true log times; minbase has no time sync
+cron               # needed by the installed server: crontab and /etc/cron.d jobs, which a stock Debian install (cron is Priority important) runs; minbase has no cron

@@ -17,6 +17,7 @@ filesystem into place.
 This is a minimal, human-friendly first-run guide using the included Debian tasks and templates.
 
 - Build or obtain a template tarball
+  - Build a minimal Debian 12 rootfs from the Debian archive (root, needs mmdebstrap): `php tools/templateBuildDebian.php --suite=bookworm --packages=distros/debian/12/minimal.packages --out=/srv/build/debian-12-minimal-rootfs.tar.gz`, then release it with `tools/templateRelease.php --rootfs=...` (see `tools/README.md`)
   - From a live host: `php tools/templateAssemble.php --source-host <host> --source-user root --output /srv/templates/debian-base.tar.gz`
   - From a disk image: `sudo php tools/templateCloneImage.php --image /path/debian.img --output /srv/templates/debian-base.tar.gz`
   - Validate contents: `php tools/check-template.php /srv/templates/debian-base.tar.gz`

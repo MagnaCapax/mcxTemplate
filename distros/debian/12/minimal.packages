@@ -1,0 +1,19 @@
+# Debian 12 (bookworm) minimal template: the packages tools/templateBuildDebian.php adds to
+# mmdebstrap's minbase variant (essential + Priority required + apt). Recommends are not installed.
+# Every line names the code that needs the package; a line without "# needed by" is refused.
+# Packages already in minbase are listed only when the engine calls them directly (passwd).
+# Banned packages (src/Lib/Release/BannedPackages.php) are refused here and in the built image.
+linux-image-amd64  # needed by BootVerifier::kernel (/boot/vmlinuz-* with initrd.img) and task 40 update-initramfs
+initramfs-tools    # needed by task 40 (update-initramfs -u) and BootVerifier::kernel (non-empty initrd.img)
+grub-pc            # needed by task 40 (update-grub, grub-install on GRUB_TARGETS), BootVerifier grubConfig and bootCode; LayoutPlanner is BIOS/MBR only
+mdadm              # needed by task 32 (mdadm --detail --scan, task_preconditions), LayoutPlanner::templateNeeds (biosNvmeUsbBoot) and BootVerifier::mdadmConf
+php-cli            # needed by LayoutPlanner::finish (chroot php /opt/mcxTemplate/installTemplate.php) and every task (ADR-0001: tasks run with the chroot's php)
+passwd             # needed by LayoutPlanner::finish rootPassword step (chroot chpasswd -e)
+ifupdown           # needed by task 22: create-network-config.php writes /etc/network/interfaces (templates/network/interfaces.tpl)
+iproute2           # needed by task 22 (ip addr/ip route fallback), Common::detectPrimaryInterface (ip route show default, else the NIC name falls back to eth0) and ifupdown's static stanza
+systemd-sysv       # needed by booting (/sbin/init) and task 15 (systemd-machine-id-setup)
+udev               # needed by booting: /dev/disk/by-uuid for the UUID fstab task 30 writes, md assembly of /boot, NIC naming that task 22 predicts
+kmod               # needed by booting: loading the disk, md and NIC modules the kernel does not build in
+e2fsprogs          # needed by the ext4 filesystems in the fstab task 30 writes (fsck.ext4 for pass 1 and 2 at boot)
+openssh-server     # needed by task 13 (ssh-keygen -A, from its dependency openssh-client) and root password login over SSH after install
+ca-certificates    # needed by tasks 24 and 26 when given https URIs (PHP verifies TLS against the system CA bundle)

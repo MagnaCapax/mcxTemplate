@@ -1,0 +1,32 @@
+Package: base-files
+Essential: yes
+Status: install ok installed
+Priority: required
+Version: 12.4+deb12u1
+Description: Debian base system miscellaneous files
+ This package contains the basic filesystem hierarchy of a Debian system.
+
+Package: fail2ban
+Status: install ok installed
+Priority: optional
+Version: 1.0.2-2
+Description: ban hosts that cause multiple authentication errors
+
+Package: ufw
+Status: deinstall ok config-files
+Priority: optional
+Version: 0.36.2-1
+Description: program for managing a Netfilter firewall
+
+Package: sshguard
+Status: install ok unpacked
+Priority: optional
+Version: 2.4.2-1
+Description: Protects from brute force attacks against ssh
+
+Package: openssh-server
+Status: install ok installed
+Priority: optional
+Version: 1:9.2p1-2+deb12u3
+Description: secure shell (SSH) server, for secure access from remote machines
+ Package: crowdsec appears in this continuation line and must not count.

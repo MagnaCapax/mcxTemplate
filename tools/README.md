@@ -282,3 +282,36 @@ With defaults, the engine is embedded at `/mnt/target/opt/mcxTemplate` after ext
 - `chroot /mnt/target /usr/bin/env -i HOME=/root PATH=/usr/bin:/usr/sbin:/bin:/sbin bash -c "php /opt/mcxTemplate/installTemplate.php --hostname=example1.dc.local --network-cidr=192.0.2.10/24 --gateway=192.0.2.1 --mount=/,/dev/sda1 --mount=swap,/dev/sda2"`
 
 5) Unmount and reboot into the installed system
+
+## templateBuildDebian.php (build from the Debian archive)
+
+`templateBuildDebian.php` builds a root filesystem archive from the Debian archive with
+`mmdebstrap` instead of capturing a machine ([ADR-0007](../docs/adr/0007-templates-may-be-built-from-the-debian-archive.md)).
+A capture carries whatever the source machine had installed; a build carries only the
+`minbase` variant plus a reviewed package list. Captures stay supported.
+
+### Dependencies
+
+* `php`, run as root (`mmdebstrap` needs root to give the files their real owners)
+* `mmdebstrap` and network access to a Debian mirror
+
+### Synopsis
+
+```bash
+php tools/templateBuildDebian.php --suite=bookworm --packages=distros/debian/12/minimal.packages \
+    --out=/srv/build/debian-12-minimal-rootfs.tar.gz [--mirror=http://deb.debian.org/debian]
+```
+
+* The package list has one package per line, each followed by `# needed by <code>` naming
+  what requires it; a line without it is refused. Recommends are not installed.
+* A banned package (`src/Lib/Install/BannedPackages.php`, ADR-0006: SSH brute-force blockers and host
+  firewalls) is refused in the list, and the built image's dpkg status is checked again before
+  the archive is written.
+* Three files are written into the image: `/etc/hostname` (`localhost`) and an empty
+  `/etc/resolv.conf`, so nothing of the build host ends up in a published template (the install
+  rewrites both), and `/etc/ssh/sshd_config.d/50-mcxtemplate-root-login.conf` with
+  `PermitRootLogin yes`, so root logs in with the password the install sets.
+* `--mirror` ends up in the image's apt sources: use a mirror the installed machines can reach.
+* `--out` is never replaced. Output is one JSON line: suite, installed package count, bytes,
+  sha256 and path. The archive has no `rootfs/` prefix; release it with
+  `tools/templateRelease.php --rootfs=<out> ...`.

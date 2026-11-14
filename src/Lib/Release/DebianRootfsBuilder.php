@@ -7,11 +7,11 @@ use Lib\Install\BannedPackages;
 use Lib\Install\CommandRunner;
 use Lib\Install\InstallRefusal;
 
-// DebianRootfsBuilder builds a minimal Debian root filesystem archive from the Debian archive with
-// mmdebstrap, instead of capturing a golden machine. The result is the --rootfs input of
-// tools/templateRelease.php: a gzip-compressed tar with no rootfs/ prefix ("./etc/...", as a capture).
+// DebianRootfsBuilder builds a minimal Debian (or Debian-derivative, e.g. Ubuntu) root filesystem archive from
+// the distribution's archive with mmdebstrap, instead of capturing a golden machine. The result is the --rootfs
+// input of tools/templateRelease.php: a gzip-compressed tar with no rootfs/ prefix ("./etc/...", as a capture).
 //
-// Inputs are a suite name and a reviewed package list (distros/debian/<version>/minimal.packages):
+// Inputs are a suite name and a reviewed package list (distros/<distro>/<version>/minimal.packages):
 // one package per line, each with a "# needed by <code>" comment naming what requires it. The build is
 // variant minbase plus that list; Recommends are not installed (mmdebstrap's default, so no apt option
 // has to be left behind in the image). Three files are written into the image by mmdebstrap's
@@ -38,6 +38,10 @@ final class DebianRootfsBuilder
     private const PACKAGE = '/^[a-z0-9][a-z0-9+.-]{1,99}$/D';
     private const LINE = '/^(\S+)\s+#\s*needed by\s+(\S.*)$/D';
     private const MIRROR = '#^https?://[A-Za-z0-9][A-Za-z0-9._~:/%+-]{0,250}$#D';
+    // Optional apt sources, for archives mmdebstrap does not know (Ubuntu): comma lists of names, and a keyring file path.
+    private const COMPONENTS = '/^[a-z][a-z0-9-]{0,31}(,[a-z][a-z0-9-]{0,31}){0,7}$/D';
+    private const POCKETS = '/^[a-z][a-z0-9]{0,31}(,[a-z][a-z0-9]{0,31}){0,7}$/D';
+    private const KEYRING = '#^/[A-Za-z0-9._+/-]{1,200}\.gpg$#D';
 
     private CommandRunner $runner;
     private bool $isRoot;
@@ -55,14 +59,15 @@ final class DebianRootfsBuilder
     }
 
     /**
-     * Parse --suite=, --packages=, --out= (required) and --mirror= (optional). Throws "usage" on anything else.
+     * Parse --suite=, --packages=, --out= (required) and --mirror=, --components=, --pockets=, --keyring= (optional).
+     * Throws "usage" on anything else.
      *
      * @param array<int,string> $args arguments without the program name
-     * @return array{suite:string,packages:string,out:string,mirror:string}
+     * @return array{suite:string,packages:string,out:string,mirror:string,components:string,pockets:string,keyring:string}
      */
     public static function parseArguments(array $args): array
     {
-        $want = ['suite' => '', 'packages' => '', 'out' => '', 'mirror' => ''];
+        $want = ['suite' => '', 'packages' => '', 'out' => '', 'mirror' => '', 'components' => '', 'pockets' => '', 'keyring' => ''];
         foreach ($args as $arg) {
             $eq = strpos($arg, '=');
             $key = $eq === false ? '' : substr($arg, 2, $eq - 2);
@@ -114,11 +119,12 @@ final class DebianRootfsBuilder
     }
 
     /**
+     * @param array{components?:string,pockets?:string,keyring?:string} $sources optional apt sources (see sourcesArguments)
      * @return array{suite:string,packages:int,bytes:int,sha256:string,out:string}
      */
-    public function build(string $suite, string $packagesFile, string $out, string $mirror = ''): array
+    public function build(string $suite, string $packagesFile, string $out, string $mirror = '', array $sources = []): array
     {
-        $packages = $this->checkInputs($suite, $packagesFile, $out, $mirror);
+        $packages = $this->checkInputs($suite, $packagesFile, $out, $mirror, $sources);
         $work = dirname($out) . '/.build-' . bin2hex(random_bytes(6));
         $old = umask(0077);
         $created = @mkdir($work, 0700);
@@ -143,9 +149,7 @@ final class DebianRootfsBuilder
                 $argv[] = '--customize-hook=upload ' . $local . ' ' . $inside;
             }
             array_push($argv, $suite, $tar);
-            if ($mirror !== '') {
-                $argv[] = $mirror;
-            }
+            array_push($argv, ...self::sourcesArguments($suite, $mirror, $sources));
             // TMPDIR keeps mmdebstrap's chroot on the output filesystem, not on a small /tmp tmpfs.
             $run = $this->runner->run($argv, null, ['TMPDIR' => $work] + self::environment());
             if ($run['code'] !== 0 || !is_file($tar)) {
@@ -170,8 +174,41 @@ final class DebianRootfsBuilder
             'sha256' => (string) hash_file('sha256', $out), 'out' => $out];
     }
 
-    /** @return array<string,string> package => reason */
-    private function checkInputs(string $suite, string $packagesFile, string $out, string $mirror): array
+    /**
+     * Where the image's apt sources come from. Without --components, --pockets and --keyring mmdebstrap decides
+     * (Debian: the suite, its -updates and -security, main). With any of them each source is written out as one
+     * line, which needs --mirror: mmdebstrap does not know Ubuntu's pockets, so without this a noble image would
+     * carry only the release pocket and never see a security update. --keyring becomes the line's signed-by and
+     * must exist on the build host (the distribution's keyring package) and, at the same path, in the image.
+     *
+     * @param array{components?:string,pockets?:string,keyring?:string} $sources
+     * @return array<int,string> the mmdebstrap MIRROR arguments after TARGET
+     */
+    public static function sourcesArguments(string $suite, string $mirror, array $sources): array
+    {
+        $components = $sources['components'] ?? '';
+        $pockets = $sources['pockets'] ?? '';
+        $keyring = $sources['keyring'] ?? '';
+        if ($components === '' && $pockets === '' && $keyring === '') {
+            return $mirror === '' ? [] : [$mirror];
+        }
+        $suites = [$suite];
+        foreach ($pockets === '' ? [] : explode(',', $pockets) as $pocket) {
+            $suites[] = $suite . '-' . $pocket;
+        }
+        $options = $keyring === '' ? '' : ' [signed-by=' . $keyring . ']';
+        $lines = [];
+        foreach ($suites as $name) {
+            $lines[] = 'deb' . $options . ' ' . $mirror . ' ' . $name . ' ' . str_replace(',', ' ', $components === '' ? 'main' : $components);
+        }
+        return $lines;
+    }
+
+    /**
+     * @param array{components?:string,pockets?:string,keyring?:string} $sources
+     * @return array<string,string> package => reason
+     */
+    private function checkInputs(string $suite, string $packagesFile, string $out, string $mirror, array $sources = []): array
     {
         if (preg_match(self::SUITE, $suite) !== 1) {
             throw new InstallRefusal('buildInputInvalid', '--suite is malformed');
@@ -179,6 +216,7 @@ final class DebianRootfsBuilder
         if ($mirror !== '' && preg_match(self::MIRROR, $mirror) !== 1) {
             throw new InstallRefusal('buildInputInvalid', '--mirror must be a plain http(s) URL');
         }
+        $this->checkSources($mirror, $sources);
         if ($out === '' || $out[0] !== '/' || preg_match('#(^|/)\.\.?(/|$)|//|\s#', $out) === 1 || substr($out, -7) !== '.tar.gz') {
             throw new InstallRefusal('buildInputInvalid', '--out must be a clean absolute path ending in .tar.gz');
         }
@@ -203,6 +241,31 @@ final class DebianRootfsBuilder
             throw new InstallRefusal('mmdebstrapMissing', 'mmdebstrap is not installed (apt install mmdebstrap)');
         }
         return $packages;
+    }
+
+    // checkSources refuses a malformed --components, --pockets or --keyring, any of them without --mirror, and a keyring file that is not on this host.
+    /** @param array{components?:string,pockets?:string,keyring?:string} $sources */
+    private function checkSources(string $mirror, array $sources): void
+    {
+        $patterns = ['components' => self::COMPONENTS, 'pockets' => self::POCKETS, 'keyring' => self::KEYRING];
+        $given = false;
+        foreach ($patterns as $key => $pattern) {
+            $value = $sources[$key] ?? '';
+            if ($value === '') {
+                continue;
+            }
+            $given = true;
+            if (preg_match($pattern, $value) !== 1 || ($key === 'keyring' && preg_match('#(^|/)\.\.?(/|$)|//#', $value) === 1)) {
+                throw new InstallRefusal('buildInputInvalid', '--' . $key . ' is malformed');
+            }
+        }
+        if ($given && $mirror === '') {
+            throw new InstallRefusal('buildInputInvalid', '--components, --pockets and --keyring need --mirror');
+        }
+        $keyring = $sources['keyring'] ?? '';
+        if ($keyring !== '' && !is_file($keyring)) {
+            throw new InstallRefusal('buildInputInvalid', '--keyring is not a file on this host (install the distribution keyring package)');
+        }
     }
 
     // installedCount: packages whose dpkg Status is "install ok installed" (reported, not checked).

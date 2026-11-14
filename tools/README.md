@@ -283,10 +283,11 @@ With defaults, the engine is embedded at `/mnt/target/opt/mcxTemplate` after ext
 
 5) Unmount and reboot into the installed system
 
-## templateBuildDebian.php (build from the Debian archive)
+## templateBuildDebian.php (build from the Debian or Ubuntu archive)
 
-`templateBuildDebian.php` builds a root filesystem archive from the Debian archive with
-`mmdebstrap` instead of capturing a machine ([ADR-0007](../docs/adr/0007-templates-may-be-built-from-the-debian-archive.md)).
+`templateBuildDebian.php` builds a root filesystem archive from the Debian or Ubuntu archive with
+`mmdebstrap` instead of capturing a machine ([ADR-0007](../docs/adr/0007-templates-may-be-built-from-the-debian-archive.md),
+[ADR-0010](../docs/adr/0010-templatebuilddebian-builds-ubuntu-from-its-archive-with-written-out-apt-sources.md)).
 A capture carries whatever the source machine had installed; a build carries only the
 `minbase` variant plus a reviewed package list. Captures stay supported.
 
@@ -294,12 +295,18 @@ A capture carries whatever the source machine had installed; a build carries onl
 
 * `php`, run as root (`mmdebstrap` needs root to give the files their real owners)
 * `mmdebstrap` and network access to a Debian mirror
+* An Ubuntu build also needs the `ubuntu-keyring` package on the build host
 
 ### Synopsis
 
 ```bash
 php tools/templateBuildDebian.php --suite=bookworm --packages=distros/debian/12/minimal.packages \
     --out=/srv/build/debian-12-minimal-rootfs.tar.gz [--mirror=http://deb.debian.org/debian]
+
+# Ubuntu 24.04: the sources are written out, with the -updates and -security pockets
+php tools/templateBuildDebian.php --suite=noble --packages=distros/ubuntu/24.04/minimal.packages \
+    --out=/srv/build/ubuntu-24.04-minimal-rootfs.tar.gz --mirror=http://archive.ubuntu.com/ubuntu \
+    --components=main,universe --pockets=updates,security --keyring=/usr/share/keyrings/ubuntu-archive-keyring.gpg
 ```
 
 * The package list has one package per line, each followed by `# needed by <code>` naming
@@ -312,6 +319,10 @@ php tools/templateBuildDebian.php --suite=bookworm --packages=distros/debian/12/
   rewrites both), and `/etc/ssh/sshd_config.d/50-mcxtemplate-root-login.conf` with
   `PermitRootLogin yes`, so root logs in with the password the install sets.
 * `--mirror` ends up in the image's apt sources: use a mirror the installed machines can reach.
+* `--components`, `--pockets` and `--keyring` (all need `--mirror`) write each apt source out as
+  `deb [signed-by=<keyring>] <mirror> <suite>[-<pocket>] <components>`. mmdebstrap adds the
+  updates and security pockets for a Debian suite by itself, not for an Ubuntu one. The keyring file
+  must exist on the build host and, at the same path, in the image (`ubuntu-keyring`).
 * `--out` is never replaced. Output is one JSON line: suite, installed package count, bytes,
   sha256 and path. The archive has no `rootfs/` prefix; release it with
   `tools/templateRelease.php --rootfs=<out> ...`.

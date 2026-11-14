@@ -1,0 +1,29 @@
+# Ubuntu 24.04 (noble) minimal template: the packages tools/templateBuildDebian.php adds to
+# mmdebstrap's minbase variant (essential + apt). Recommends are not installed.
+# Build it with the Ubuntu archive, its -updates and -security pockets, and the ubuntu-keyring file:
+#   --suite=noble --mirror=http://archive.ubuntu.com/ubuntu --components=main,universe
+#   --pockets=updates,security --keyring=/usr/share/keyrings/ubuntu-archive-keyring.gpg
+# Every line names what needs the package (install engine code, or the installed server itself);
+# a line without "# needed by" is refused.
+# Packages already in minbase are listed only when the engine calls them directly (passwd).
+# Banned packages (src/Lib/Install/BannedPackages.php) are refused here and in the built image.
+# Same set as distros/debian/12/minimal.packages, except: linux-image-generic for linux-image-amd64,
+# netplan.io for ifupdown (Ubuntu task 22 writes netplan, not /etc/network/interfaces).
+linux-image-generic # needed by BootVerifier::kernel (/boot/vmlinuz-* with initrd.img) and task 40 update-initramfs; its hard dependencies bring the matching modules, linux-firmware and CPU microcode (no Recommends are installed)
+initramfs-tools    # needed by task 40 (update-initramfs -u) and BootVerifier::kernel (non-empty initrd.img)
+grub-pc            # needed by task 40 (update-grub, grub-install on GRUB_TARGETS), BootVerifier grubConfig and bootCode; LayoutPlanner is BIOS/MBR only
+mdadm              # needed by task 32 (mdadm --detail --scan, task_preconditions), LayoutPlanner::templateNeeds (biosNvmeUsbBoot) and BootVerifier::mdadmConf
+php-cli            # needed by LayoutPlanner::finish (chroot php /opt/mcxTemplate/installTemplate.php) and every task (ADR-0001: tasks run with the chroot's php)
+passwd             # needed by LayoutPlanner::finish rootPassword step (chroot chpasswd -e)
+netplan.io         # needed by Ubuntu task 22: it writes /etc/netplan/01-mcx.yaml, which only netplan's boot-time generator turns into systemd-networkd configuration
+iproute2           # needed by task 22 (ip addr/ip route fallback) and Common::detectPrimaryInterface (ip route show default, else the NIC name falls back to eth0)
+systemd-sysv       # needed by booting (/sbin/init) and task 15 (systemd-machine-id-setup)
+udev               # needed by booting: /dev/disk/by-uuid for the UUID fstab task 30 writes, md assembly of /boot, NIC naming that task 22 predicts
+kmod               # needed by booting: loading the disk, md and NIC modules the kernel does not build in
+e2fsprogs          # needed by the ext4 filesystems in the fstab task 30 writes (fsck.ext4 for pass 1 and 2 at boot)
+openssh-server     # needed by task 13 (ssh-keygen -A, from its dependency openssh-client) and root password login over SSH after install
+ca-certificates    # needed by tasks 24 and 26 when given https URIs (PHP verifies TLS against the system CA bundle)
+dbus               # needed by the installed server: systemd-logind (power button, sessions), hostnamectl, timedatectl and systemctl poweroff talk over the system bus
+systemd-timesyncd  # needed by the installed server: a synced clock for TLS certificate validity (ca-certificates) and true log times; minbase has no time sync
+cron               # needed by the installed server: crontab and /etc/cron.d jobs, which a stock Ubuntu install (cron is Priority standard) runs; minbase has no cron
+smartmontools      # needed by the installed server: smartctl reads SATA and NVMe health (wear, media errors, temperature) for the post-install hardware check and later drive monitoring; minbase has none

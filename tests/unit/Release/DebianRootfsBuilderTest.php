@@ -49,6 +49,8 @@ final class FakeBuildRunner implements CommandRunner
 final class DebianRootfsBuilderTest extends TestCase
 {
     private const LIST = __DIR__ . '/../../../distros/debian/12/minimal.packages';
+    private const UBUNTU_LIST = __DIR__ . '/../../../distros/ubuntu/24.04/minimal.packages';
+    private const UBUNTU_MIRROR = 'http://archive.ubuntu.example.test/ubuntu';
     private const BANNED_STATUS = __DIR__ . '/../../fixtures/release/dpkg-status-banned';
     private const CLEAN_STATUS = "Package: base-files\nStatus: install ok installed\n\nPackage: openssh-server\nStatus: install ok installed\n";
 
@@ -92,8 +94,11 @@ final class DebianRootfsBuilderTest extends TestCase
 
     public function testArgumentsAreParsedAndAnythingElseIsUsage(): void
     {
-        $this->assertSame(['suite' => 'bookworm', 'packages' => '/p', 'out' => '/o.tar.gz', 'mirror' => ''],
+        $this->assertSame(['suite' => 'bookworm', 'packages' => '/p', 'out' => '/o.tar.gz', 'mirror' => '', 'components' => '', 'pockets' => '', 'keyring' => ''],
             DebianRootfsBuilder::parseArguments(['--suite=bookworm', '--packages=/p', '--out=/o.tar.gz']));
+        $ubuntu = DebianRootfsBuilder::parseArguments(['--suite=noble', '--packages=/p', '--out=/o.tar.gz', '--mirror=' . self::UBUNTU_MIRROR,
+            '--components=main,universe', '--pockets=updates,security', '--keyring=/usr/share/keyrings/k.gpg']);
+        $this->assertSame(['main,universe', 'updates,security', '/usr/share/keyrings/k.gpg'], [$ubuntu['components'], $ubuntu['pockets'], $ubuntu['keyring']]);
         $this->assertSame('http://deb.example.test/debian', DebianRootfsBuilder::parseArguments(['--suite=bookworm', '--packages=/p',
             '--out=/o.tar.gz', '--mirror=http://deb.example.test/debian'])['mirror']);
         foreach ([['--suite=bookworm', '--packages=/p'], ['--suite=bookworm', '--packages=/p', '--out=/o.tar.gz', '--force'],
@@ -114,6 +119,70 @@ final class DebianRootfsBuilderTest extends TestCase
         foreach (['linux-image-amd64', 'grub-pc', 'mdadm', 'openssh-server', 'php-cli', 'ifupdown', 'iproute2', 'dbus', 'systemd-timesyncd', 'cron', 'smartmontools'] as $needed) {
             $this->assertArrayHasKey($needed, $packages);
         }
+    }
+
+    public function testTheUbuntuListNamesWhatNeedsEachPackageAndHasWhatTheInstallRuns(): void
+    {
+        $packages = DebianRootfsBuilder::readPackageList((string) file_get_contents(self::UBUNTU_LIST));
+        // php for the chroot configure step (ADR-0009), smartctl for the hardware check, the services the Debian proof found missing,
+        // and netplan, because Ubuntu task 22 writes netplan and not ifupdown's file.
+        foreach (['linux-image-generic', 'grub-pc', 'mdadm', 'openssh-server', 'php-cli', 'smartmontools', 'cron', 'systemd-timesyncd', 'dbus', 'netplan.io', 'initramfs-tools'] as $needed) {
+            $this->assertArrayHasKey($needed, $packages);
+        }
+        $this->assertSame([], array_values(array_intersect(array_keys($packages), \Lib\Install\BannedPackages::NAMES)));
+        $this->assertArrayNotHasKey('ifupdown', $packages, 'Ubuntu does not read /etc/network/interfaces');
+    }
+
+    public function testNoSourceOptionsLeaveTheMirrorArgumentAsItWas(): void
+    {
+        $this->assertSame([], DebianRootfsBuilder::sourcesArguments('bookworm', '', []));
+        $this->assertSame(['http://deb.example.test/debian'], DebianRootfsBuilder::sourcesArguments('bookworm', 'http://deb.example.test/debian', []));
+    }
+
+    public function testUbuntuSourcesAreWrittenOutOnePerPocketWithTheKeyring(): void
+    {
+        $lines = DebianRootfsBuilder::sourcesArguments('noble', self::UBUNTU_MIRROR, ['components' => 'main,universe', 'pockets' => 'updates,security',
+            'keyring' => '/usr/share/keyrings/ubuntu-archive-keyring.gpg']);
+        $key = ' [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] ' . self::UBUNTU_MIRROR;
+        $this->assertSame(['deb' . $key . ' noble main universe', 'deb' . $key . ' noble-updates main universe', 'deb' . $key . ' noble-security main universe'], $lines);
+        $this->assertSame(['http://m.example.test/u'], DebianRootfsBuilder::sourcesArguments('noble', 'http://m.example.test/u', ['keyring' => '']), 'an empty option is the same as none');
+        $this->assertSame(['deb http://m.example.test/u noble main', 'deb http://m.example.test/u noble-updates main'],
+            DebianRootfsBuilder::sourcesArguments('noble', 'http://m.example.test/u', ['pockets' => 'updates']), 'components default to main, no keyring means no signed-by');
+    }
+
+    public function testAnUbuntuBuildPassesTheSourceLinesAfterTheTarget(): void
+    {
+        $keyring = $this->dir . '/ubuntu-archive-keyring.gpg';
+        file_put_contents($keyring, 'key');
+        $runner = new FakeBuildRunner(TarFixture::bytes([['./etc/os-release', "ID=ubuntu\n"]]), self::CLEAN_STATUS);
+        $out = $this->dir . '/ubuntu-24.04-minimal-rootfs.tar.gz';
+        (new DebianRootfsBuilder($runner, true, $this->mmdebstrap))->build('noble', self::UBUNTU_LIST, $out, self::UBUNTU_MIRROR,
+            ['components' => 'main,universe', 'pockets' => 'updates,security', 'keyring' => $keyring]);
+        $argv = $runner->calls[0]['argv'];
+        $at = (int) array_search('noble', $argv, true);
+        $this->assertStringEndsWith('.tar', $argv[$at + 1]);
+        $this->assertSame(['deb [signed-by=' . $keyring . '] ' . self::UBUNTU_MIRROR . ' noble main universe',
+            'deb [signed-by=' . $keyring . '] ' . self::UBUNTU_MIRROR . ' noble-updates main universe',
+            'deb [signed-by=' . $keyring . '] ' . self::UBUNTU_MIRROR . ' noble-security main universe'], array_slice($argv, $at + 2));
+        $include = (string) current(array_filter($argv, static fn (string $a): bool => strncmp($a, '--include=', 10) === 0));
+        $this->assertSame(array_keys(DebianRootfsBuilder::readPackageList((string) file_get_contents(self::UBUNTU_LIST))), explode(',', substr($include, 10)));
+        $this->assertFileExists($out);
+    }
+
+    public function testSourceOptionsAreValidatedBeforeAnyCommand(): void
+    {
+        $runner = new RecordingRunner();
+        $b = new DebianRootfsBuilder($runner, true, $this->mmdebstrap);
+        $out = $this->dir . '/out.tar.gz';
+        $keyring = $this->dir . '/k.gpg';
+        file_put_contents($keyring, 'key');
+        foreach ([[self::UBUNTU_MIRROR, ['pockets' => 'updates, security']], [self::UBUNTU_MIRROR, ['components' => 'Main']],
+            [self::UBUNTU_MIRROR, ['keyring' => 'relative/k.gpg']], [self::UBUNTU_MIRROR, ['keyring' => $this->dir . '/../k.gpg']],
+            [self::UBUNTU_MIRROR, ['keyring' => $this->dir . '/missing.gpg']],
+            ['', ['pockets' => 'updates']], ['', ['components' => 'main,universe']], ['', ['keyring' => $keyring]]] as [$mirror, $sources]) {
+            $this->assertSame('buildInputInvalid', $this->refusal(fn () => $b->build('noble', self::UBUNTU_LIST, $out, $mirror, $sources)), json_encode($sources) . $mirror);
+        }
+        $this->assertSame([], $runner->calls());
     }
 
     public function testAListLineWithoutAReasonOrRepeatedIsRefused(): void

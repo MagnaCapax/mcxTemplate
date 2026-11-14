@@ -59,8 +59,11 @@ mcxTemplate assumes the provisioning host follows the mcxRescue workflow:
 5. **Verify, logging and reboot** – `installNode.php` checks read-only that the
    new system can boot (kernel and initrd, `grub.cfg`, fstab UUIDs, GRUB boot
    code, `mdadm.conf`), then unmounts the target filesystems and stops the boot
-   array. Rebooting into the installed OS is still done by the caller (mcxRescue);
-   result delivery is not built yet.
+   array. In network mode (`--api` and `--mac`) the installer then sends the
+   result to nodeCore (generated root password, installed SSH host keys and other
+   facts) and retries until nodeCore acknowledges it. With `--reboot` it reboots into
+   the installed OS only after that acknowledgement; without `--reboot`, or in the
+   local `--plan` mode, rebooting is left to the caller (mcxRescue).
 
 This flow keeps the template build consistent and avoids running destructive
 operations inside the final system.
@@ -77,7 +80,8 @@ php installNode.php --plan=/run/plan.json --execute --secret-out=/run/root.secre
 - The chroot configuration runs with `--strict` and a minimal fixed environment, and must end with the line `MCXTEMPLATE-STRICT-CONFIGURE-OK`; exit 0 without it counts as a failure. A read-only boot check follows before the run reports success.
 - Layouts: `biosSingle` (MBR, `/boot` + swap + root, optional `/home` split) and `biosNvmeUsbBoot` (two USB sticks as md RAID1 `/boot`, large disk GPT with swap and root). UEFI is not supported.
 - Exit codes: 0 ok, 2 refusal (`REFUSED <code>: ...` on stderr; codes such as `diskMissing`, `diskAmbiguous`, `unexpectedDisk`, `sizeMismatch`, `layoutSizeRefused`, `diskInUse`, `nodeIdentityMismatch`, `deviceChanged`, `wipeNotAuthorized`, `secretOutRequired`, `secretOutInvalid`, `notRoot`, `templateHashMismatch`, `templateStageRefused`, `stepFailed`, `verifyFailed`), 3 internal error, 64 usage.
-- Status: the logic is covered by unit tests with a fake command runner. It has not been run against a real disk, and the network client, template download, result delivery and reboot are not built yet.
+- Network mode: `installNode.php --api=https://host/ --mac=aa:bb:cc:dd:ee:ff [--execute [--reboot]]` says hello to nodeCore, takes its plan (validated like a local plan; the template path is never taken from nodeCore), downloads the template (`TemplateFetcher`) into the private staging directory, runs the same prepare and execute path, reports progress events, delivers the result and, with `--reboot`, reboots after the acknowledgement. Without `--execute` it only says hello and prints the plan. A machine nodeCore has not armed gets `not armed` and nothing is touched.
+- Status: the logic is covered by unit tests with a fake command runner, and the install, including the network mode, has been run on real hardware; fixes found by those runs are in the git history from 2026-11-12 on (for example `7ce1285`, `19514db`). UEFI layouts are not supported.
 
 ## Repository Layout
 

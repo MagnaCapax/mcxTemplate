@@ -45,7 +45,7 @@ That choice has a requirement: the target root filesystem must have a PHP CLI, b
 
 PHP version: CI runs PHP 8.1, 8.2 and 8.3 with the `posix` and `pcntl` extensions. Files use `declare(strict_types=1)`.
 
-Shell: `tools/run-tests.sh` is the only shell file. It is 32 lines and branches (file discovery with or without `rg`, three ways to find PHPUnit), so under principle 1 it is past the glue limit; it becomes PHP the next time it needs a change. No Python, no Composer runtime dependencies.
+Shell: `tools/run-tests.sh` is the only shell file. It was 32 lines and branched (file discovery with or without `rg`, three ways to find PHPUnit), so it was past the glue limit under principle 1; the logic moved to `tools/runTests.php` and `run-tests.sh` is now a three-line `exec` wrapper kept so the documented and CI command keeps working. No Python, no Composer runtime dependencies.
 
 ### Build, run and test
 - Build: none. The README asks for releases as date-based tags (for example `2025.09.20`) with a `CHANGELOG.md` entry; no tag existed when this ADR was written.
@@ -74,7 +74,7 @@ Shell: `tools/run-tests.sh` is the only shell file. It is 32 lines and branches 
 
 ## Consequences
 - A contributor can see the intended layout and language rule without reading the code first.
-- Known gaps, recorded here rather than fixed in this ADR: `tools/run-tests.sh` is over the shell limit; nine runtime files are over the size target; `AGENTS.md` still carries a "default to Bash" language line that predates principle 1 and needs a decision of its own.
+- Known gaps, recorded here rather than fixed in this ADR: `tools/run-tests.sh` was over the shell limit and is now a thin wrapper (closed); nine runtime files are over the size target; `AGENTS.md` still carries a "default to Bash" language line that predates principle 1 and needs a decision of its own.
 - Any change to the layout, the entry point, the task interface or the language rule needs a new ADR that supersedes the relevant part of this one.
 
 ## References

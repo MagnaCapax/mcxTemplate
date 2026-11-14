@@ -20,6 +20,7 @@ use Lib\Install\BannedPackages;
 //                   finding's path is the package name (docs/adr/0006),
 //   dpkgStatusUnreadable  var/lib/dpkg/status is larger than BannedPackages::STATUS_MAX, so it was not read,
 //   archiveMalformed the stream is not a tar this scanner can read to its end.
+// Given a RuntimeCheck, the same pass also hands it every link and executable file (php and smartctl must be there).
 // A bare header string (no END line) is not a key. Member paths are compared without a leading "./" or "/".
 // It never extracts anything and returns paths and codes only, never file content.
 final class ContentScan
@@ -34,9 +35,11 @@ final class ContentScan
     /**
      * @param array<string,string>|null $publicBlocks known-public key blocks (sha256 => source); null means
      *                                                PrivateKeyBlock::PUBLIC (tests pass their own list)
+     * @param RuntimeCheck|null $runtime when given, receives every link and executable file the stream holds, so the
+     *                                   caller can ask whether php and smartctl are there (it adds no findings itself)
      * @return array<int,array{code:string,path:string}> empty when the archive is clean
      */
-    public static function scan(string $archive, ?array $publicBlocks = null): array
+    public static function scan(string $archive, ?array $publicBlocks = null, ?RuntimeCheck $runtime = null): array
     {
         $publicBlocks = $publicBlocks ?? PrivateKeyBlock::PUBLIC;
         $gz = @gzopen($archive, 'rb');
@@ -47,7 +50,9 @@ final class ContentScan
         $shadowSeen = false;
         try {
             $longName = '';
+            $longLink = '';
             $paxPath = '';
+            $paxLink = '';
             $paxSize = null;
             while (true) {
                 $header = self::readExact($gz, self::BLOCK);
@@ -64,20 +69,28 @@ final class ContentScan
                     $data = self::readData($gz, $entry['size'], true);
                     if ($type === 'L') {
                         $longName = rtrim($data, "\0");
+                    } elseif ($type === 'K') {
+                        $longLink = rtrim($data, "\0");
                     } elseif ($type === 'x') {
-                        [$paxPath, $paxSize] = self::paxRecords($data);
+                        [$paxPath, $paxSize, $paxLink] = self::paxRecords($data);
                     }
-                    continue; // metadata entries describe the NEXT entry; keep $longName/$paxPath for it
+                    continue; // metadata entries describe the NEXT entry; keep the long/pax values for it
                 }
 
                 // The pax size and path (when present) win over the header fields, then the GNU long name.
                 $size = $paxSize ?? $entry['size'];
                 $name = $paxPath !== '' ? $paxPath : ($longName !== '' ? $longName : $entry['name']);
                 $path = self::normalise($name);
+                $linkTarget = $paxLink !== '' ? $paxLink : ($longLink !== '' ? $longLink : $entry['link']);
                 $longName = '';
+                $longLink = '';
                 $paxPath = '';
+                $paxLink = '';
                 $paxSize = null;
                 $isFile = $type === '0' || $type === "\0" || $type === '7';
+                if ($runtime !== null) {
+                    self::noteRuntime($runtime, $type, $path, $linkTarget, $entry['mode']);
+                }
                 $base = basename($path);
                 if ($base === 'authorized_keys' || $base === 'authorized_keys2') {
                     $findings[] = ['code' => 'authorizedKeys', 'path' => $path];
@@ -161,7 +174,7 @@ final class ContentScan
     }
 
     /**
-     * @return array{name:string,size:int,type:string}
+     * @return array{name:string,size:int,type:string,mode:int,link:string}
      */
     private static function parseHeader(string $h): array
     {
@@ -189,7 +202,8 @@ final class ContentScan
         } else {
             $size = (int) octdec(trim($sizeField, "\0 "));
         }
-        return ['name' => $name, 'size' => $size, 'type' => $h[156]];
+        return ['name' => $name, 'size' => $size, 'type' => $h[156], 'mode' => (int) octdec(trim(substr($h, 100, 8), "\0 ")),
+            'link' => rtrim(substr($h, 157, 100), "\0")];
     }
 
     // normalise drops "./" and leading slashes so rules match "etc/shadow" however the archive spells it.
@@ -244,11 +258,12 @@ final class ContentScan
     /**
      * Parse a pax extended header ("<len> key=value\n" records) for the keys that change the next entry.
      *
-     * @return array{0:string,1:?int} path override, size override
+     * @return array{0:string,1:?int,2:string} path override, size override, link target override
      */
     private static function paxRecords(string $data): array
     {
         $path = '';
+        $linkPath = '';
         $size = null;
         $offset = 0;
         while ($offset < strlen($data)) {
@@ -264,12 +279,28 @@ final class ContentScan
                 $value = substr($record, $eq + 1);
                 if ($key === 'path') {
                     $path = $value;
+                } elseif ($key === 'linkpath') {
+                    $linkPath = $value;
                 } elseif ($key === 'size' && ctype_digit($value)) {
                     $size = (int) $value;
                 }
             }
             $offset += $len;
         }
-        return [$path, $size];
+        return [$path, $size, $linkPath];
+    }
+
+    // noteRuntime hands one entry to the RuntimeCheck: a symlink as itself, a hard link as an absolute link to
+    // its target member (hard link targets name an archive member, not a path beside the link), and a regular
+    // file only when it has an execute bit.
+    private static function noteRuntime(RuntimeCheck $runtime, string $type, string $path, string $link, int $mode): void
+    {
+        if ($type === '2') {
+            $runtime->noteLink($path, $link);
+        } elseif ($type === '1') {
+            $runtime->noteLink($path, '/' . self::normalise($link));
+        } elseif (($type === '0' || $type === "\0" || $type === '7') && ($mode & 0111) !== 0) {
+            $runtime->noteExecutable($path);
+        }
     }
 }

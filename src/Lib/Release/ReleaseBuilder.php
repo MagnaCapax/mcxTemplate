@@ -15,7 +15,8 @@ use Lib\Provisioning\Common;
 //   mcxInstall.sh                                         the bootstrap with its three constants filled
 // Every external step goes through the CommandRunner (argv arrays, no shell) and reuses the existing
 // tools: tools/templateRehydrate.php and tools/check-template.php run unchanged. It refuses a dirty
-// engine repository, a rootfs that fails ContentScan, and (unless told otherwise) a non-root run:
+// engine repository, a rootfs that fails ContentScan, a rootfs without an executable php or smartctl (the engine
+// runs `chroot <target> php` after it has wiped the disk), and (unless told otherwise) a non-root run:
 // the rehydrate step extracts the rootfs with tar, and only root keeps the file owners.
 // ContentScan notices (a known-public package key fixture) do not refuse; they come back as scanNotices.
 final class ReleaseBuilder
@@ -51,10 +52,17 @@ final class ReleaseBuilder
     {
         $this->checkInputs($rootfs, $name, $version, $out, $apiUrl, $artifactBase);
         $commit = $this->cleanHead();
-        [$refusals, $notices] = ContentScan::partition(ContentScan::scan($rootfs));
+        $runtime = new RuntimeCheck();
+        [$refusals, $notices] = ContentScan::partition(ContentScan::scan($rootfs, null, $runtime));
         $describe = static fn (array $f): string => $f['code'] . ($f['path'] !== '' ? ' ' . $f['path'] : '');
         if ($refusals !== []) {
             throw new InstallRefusal('contentScanRefused', implode(', ', array_map($describe, $refusals)));
+        }
+        // Only a readable archive can be judged: a malformed one is already refused above.
+        $absent = $runtime->missing();
+        if ($absent !== []) {
+            throw new InstallRefusal('templateMissingRuntime', 'the rootfs has no executable ' . implode(', no executable ', $absent)
+                . ' (the install runs php in the target after wiping the disk; the hardware check needs smartctl)');
         }
         $scanNotices = array_map($describe, $notices);
 

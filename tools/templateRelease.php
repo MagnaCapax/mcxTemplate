@@ -35,7 +35,9 @@ function usage(int $code): int
         . "  --unsafe-allow-non-root  test builds only: file owners in the archive will be wrong\n"
         . "Refuses a dirty engine repository and a rootfs holding private key blocks (other than SSH host keys),\n"
         . "authorized_keys files, an unlocked root password, or an installed fail2ban, ufw, crowdsec or sshguard package (ADR-0006). A known-public package key fixture does not\n"
-        . "refuse; it is printed as NOTICE publicFixture <path> on stderr. Prints the mcxSha256 pin of the bootstrap.\n");
+        . "refuse; it is printed as NOTICE publicFixture <path> on stderr. Also refuses (templateMissingRuntime) a rootfs with no executable\n"
+        . "usr/bin/php or usr/sbin/smartctl, symlinks followed inside the archive: the install runs php in the target after wiping the disk.\n"
+        . "Prints the mcxSha256 pin of the bootstrap.\n");
     return $code;
 }
 

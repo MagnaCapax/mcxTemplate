@@ -47,7 +47,7 @@ final class ReleaseBuilderTest extends TestCase
 
     private function rootfs(array $extra = []): string
     {
-        return TarFixture::write($this->dir . '/rootfs.tar.gz', array_merge([['etc/shadow', self::SHADOW], ['etc/os-release', "ID=debian\nVERSION_ID=\"12\"\n"]], $extra));
+        return TarFixture::write($this->dir . '/rootfs.tar.gz', array_merge([['etc/shadow', self::SHADOW], ['etc/os-release', "ID=debian\nVERSION_ID=\"12\"\n"]], TarFixture::runtime(), $extra));
     }
 
     private function code(ReleaseBuilder $b, string $rootfs, string $out, array $over = []): string
@@ -115,6 +115,42 @@ final class ReleaseBuilderTest extends TestCase
         $this->assertStringNotContainsString('bannedPackage', $result);
     }
 
+    /** @return array<string,array{0:array<int,array<int,mixed>>,1:string}> rootfs extras (no php or smartctl from the fixture) and the path the message must name */
+    public static function missingRuntimes(): array
+    {
+        $smartctl = ['usr/sbin/smartctl', "x\n", '0', 0755];
+        return [
+            'no php' => [[$smartctl], 'no executable usr/bin/php'],
+            'php is a dangling symlink' => [[['usr/bin/php', '/etc/alternatives/php', '2'], $smartctl], 'no executable usr/bin/php'],
+            'php is a symlink loop' => [[['usr/bin/php', 'php', '2'], $smartctl], 'no executable usr/bin/php'],
+            'no smartctl' => [array_slice(TarFixture::runtime(), 0, 3), 'no executable usr/sbin/smartctl'],
+        ];
+    }
+
+    /**
+     * A rootfs without php would wipe a node and then fail at configure (chroot php exit 127); one without smartctl fails the
+     * hardware check. Expected: templateMissingRuntime naming the path, before any export, rehydrate or archive step, nothing written.
+     *
+     * @dataProvider missingRuntimes
+     * @param array<int,array<int,mixed>> $extra
+     */
+    public function testARootfsWithoutAnExecutablePhpOrSmartctlIsRefusedAndNothingIsWritten(array $extra, string $named): void
+    {
+        $runner = $this->cleanGit();
+        $rootfs = TarFixture::write($this->dir . '/rt.tar.gz', array_merge([['etc/shadow', self::SHADOW], ['etc/os-release', "ID=debian\nVERSION_ID=\"12\"\n"]], $extra));
+        $result = $this->code(new ReleaseBuilder($runner, '/repo', true), $rootfs, $this->dir . '/out');
+        $this->assertStringStartsWith('templateMissingRuntime', $result);
+        $this->assertStringContainsString($named, $result);
+        $this->assertDirectoryDoesNotExist($this->dir . '/out');
+        $this->assertCount(2, $runner->calls(), 'only git status and rev-parse ran: no export, rehydrate or archive step');
+    }
+
+    public function testAKeyFindingIsReportedBeforeTheMissingRuntime(): void
+    {
+        $rootfs = TarFixture::write($this->dir . '/both.tar.gz', [['etc/shadow', "root:\$6\$x\$y:1:::::\n"]]);
+        $result = $this->code(new ReleaseBuilder($this->cleanGit(), '/repo', true), $rootfs, $this->dir . '/out');
+        $this->assertStringStartsWith('contentScanRefused', $result, 'content refusals come first');
+    }
     /** @return array<string,array{0:array<string,string>}> */
     public static function badInputs(): array
     {
@@ -189,9 +225,9 @@ final class ReleaseBuilderTest extends TestCase
     {
         $run = new ProcessRunner();
         $repo = $this->throwAwayRepo($run);
-        $rootfs = TarFixture::write($this->dir . '/rootfs.tar.gz', [['etc/shadow', self::SHADOW],
+        $rootfs = TarFixture::write($this->dir . '/rootfs.tar.gz', array_merge([['etc/shadow', self::SHADOW],
             ['usr/lib/os-release', "ID=debian\nVERSION_ID=\"13\"\n"], ['etc/os-release', '../usr/lib/os-release', '2'],
-            ['opt/mcxTemplate/Debian/bookworm/stale-engine.txt', "old layout\n"]]);
+            ['opt/mcxTemplate/Debian/bookworm/stale-engine.txt', "old layout\n"]], TarFixture::runtime()));
         $out = $this->dir . '/out';
         $builder = new ReleaseBuilder($run, $repo, false, true, static fn (): int => 1793318400);
         $r = $builder->build($rootfs, 'debian-13-base', '20261111', $out, self::API, self::BASE);

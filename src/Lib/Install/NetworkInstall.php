@@ -20,6 +20,8 @@ final class NetworkInstall
     private CommandRunner $reader;
     private CommandRunner $writer;
     private SystemStateReader $state;
+    /** @var array<int,string> serials and WWNs of every disk the hello listed: never sent in a failure report */
+    private array $diskIds = [];
     /** @var callable(string):void */
     private $out;
     /** @var array<string,mixed> */
@@ -71,15 +73,24 @@ final class NetworkInstall
 
         $reporter = new InstallReporter($this->client, $plan['jobId'], $plan['token'], $this->out, $this->options['sleep'] ?? null,
             $this->options['now'] ?? null, $this->options['maxAckRounds'] ?? null);
+        $reporter->withhold(array_merge([$plan['token']], $this->diskIds));
         try {
             [$password, $facts] = $this->install($plan, $reporter);
             $reporter->deliver($password, $facts);
             $password = '';
         } catch (\Throwable $error) {
-            $code = $error instanceof InstallRefusal ? $error->refusalCode() : 'internalError';
-            // Only a failed step sends its message (step id, exit code, stderr): other refusals can name disk serials,
-            // which nodeCore keeps out of stored events, and an internal error stays the class name on the console.
-            $reporter->failed($code, $code === 'stepFailed' ? $error->getMessage() : '');
+            // The disk may already be written and a node in the install environment has no sshd, so the report is the
+            // only place the reason can be read. A refusal sends its own message (the check, the step and its stderr, the
+            // role of a changed device, which layout refused); the reporter replaces serials, WWNs and the token in it and
+            // caps it. An unexpected exception can carry anything, so only its class and where it was thrown are sent.
+            if ($error instanceof InstallRefusal) {
+                $code = $error->refusalCode();
+                $detail = $error->getMessage();
+            } else {
+                $code = 'internalError';
+                $detail = (string) strtok(get_class($error), "\0") . ' at ' . basename($error->getFile()) . ':' . $error->getLine();
+            }
+            $reporter->failed($code, $detail);
             throw $error;
         }
         if ($reboot) {
@@ -170,6 +181,7 @@ final class NetworkInstall
         $state = $this->state->read($this->reader, array_map(static fn (array $d): string => $d['kname'], $inventory));
         $disks = [];
         foreach ($inventory as $d) {
+            $this->diskIds = array_merge($this->diskIds, [$d['serial'], $d['wwn']]);
             $disks[] = ['name' => $d['kname'], 'serial' => $d['serial'], 'wwn' => $d['wwn'], 'sizeBytes' => $d['sizeBytes'],
                 'transport' => $d['tran'], 'model' => $d['model'], 'idPath' => $d['idPath'], 'removable' => $d['removable']];
         }

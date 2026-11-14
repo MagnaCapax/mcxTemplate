@@ -17,5 +17,8 @@ All notable changes to this project will be documented in this file.
 
 - `tools/templateBuildDebian.php` builds Ubuntu 24.04 (noble) too (ADR-0010): optional `--components`, `--pockets` and `--keyring` write each apt source out (the suite and its `-updates` and `-security`, with `signed-by`), because mmdebstrap adds those pockets only for a Debian suite. `distros/ubuntu/24.04/minimal.packages` is the reviewed list: the Debian one with `linux-image-generic` and `netplan.io` (Ubuntu task 22 writes netplan). It includes php-cli, smartmontools, cron, time sync and dbus, so the install no longer stops at `chroot: failed to run command 'php'`. Without the new arguments the build is unchanged.
 
+- Strict installs no longer report success when the hostname or network render failed (ADR-0011): under `MCX_STRICT` tasks 21 and 22 fail when their helper fails (non-strict runs stay as they were), and `verifyBoot` now also reads back the installed `/etc/hostname` and the requested static address (`/etc/network/interfaces` or a netplan file), refusing with `verifyFailed: hostname` or `verifyFailed: network`. Two real installs had kept the template's hostname, or come up on DHCP.
+- Every failure of the network install now reports a short reason in the `failed` event's `error` (ADR-0012): the check that failed, the role of a changed device, the failing step's stderr. Serials, WWNs and the job token are replaced with `[redacted]`, the text is capped at 400 bytes, and an unexpected exception reports only its class and where it was thrown.
+
 - Initial structured logging, mount-spec, and task controls implemented (details to be finalized for the first tagged release).
 

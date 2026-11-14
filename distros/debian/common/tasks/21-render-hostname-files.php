@@ -76,6 +76,11 @@ foreach ($exports as $key => $value) {
 
 $success = Common::runPhpScript($repoRoot . '/distros/common/create-hostname.php', [], false);
 if (!$success) {
+    // Strict mode (the network install sets it) must not report an install whose hostname was never written:
+    // the node would keep the template's name (ADR-0011). Without it the old fail-soft behaviour stays.
+    if (trim((string) (getenv('MCX_STRICT') ?: '')) === '1') {
+        Common::fail('Task 21: the hostname helper failed and strict mode is on.');
+    }
     Common::logWarn('Hostname helper failed; leaving existing hostname files.');
     return;
 }

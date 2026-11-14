@@ -6,10 +6,11 @@ namespace Lib\Install;
 // InstallReporter is the install's voice towards nodeCore for ONE job: it numbers the
 // events (seq starts at 1 and only advances when nodeCore accepted one, so there are no
 // gaps), turns the executor's step ids into the contract's phase events, reports a
-// failure as {phase, code} (plus error, the failing step and its stderr, for stepFailed),
+// failure as {phase, code, error} (error: a short, bounded text without secrets, see failed()),
 // and delivers the result until nodeCore acknowledges it.
 //
-// What may be sent: names, counts, device serials and kernel names. The token goes into
+// What may be sent: names, counts, device serials and kernel names, except in a failure's error text, where serials,
+// WWNs and the token are replaced (withhold()). The token goes into
 // request bodies only (by NodeCoreClient); the root password goes into the result body
 // only and is never kept here, printed or put in an event.
 final class InstallReporter
@@ -17,6 +18,11 @@ final class InstallReporter
     public const ACK_WAIT_SECONDS = 600;
     // ERROR_MAX caps the failed event's error text (the step id, exit code and up to 300 bytes of stderr fit).
     public const ERROR_MAX = 400;
+    // Stands in for a withheld value (a disk serial, the job token) in a reported error.
+    public const REDACTED = '[redacted]';
+    // Values shorter than this are not withheld: replacing a one- or two-character serial would shred the text and
+    // such a value identifies nothing.
+    private const WITHHOLD_MIN = 4;
     // Step-id prefix => [phase, event posted once that phase is complete].
     private const WIPE = '/^(stopArray|(root|boot[01])(Wipefs|Zap|ZeroHead|ZeroTail|Reread))/D';
     private const PARTITION = '/^(partition|settle|wipe|mdCreate|mkfs|mkswap|mkdir|mount)/D';
@@ -36,6 +42,8 @@ final class InstallReporter
     /** @var callable():int */
     private $now;
     private ?int $maxAckRounds;
+    /** @var array<int,string> values that must never appear in a reported error, longest first */
+    private array $withheld = [];
 
     /**
      * @param callable(string):void   $out    console line sink (never receives secrets)
@@ -55,6 +63,20 @@ final class InstallReporter
         };
         $this->now = $now ?? static fn (): int => time();
         $this->maxAckRounds = $maxAckRounds;
+    }
+
+    /**
+     * withhold registers values a reported error must not carry: disk serials and WWNs (nodeCore keeps them out of
+     * stored events) and the job token. failed() replaces each, in any letter case, with REDACTED before it cuts
+     * the text to ERROR_MAX, so a cut can never leave a half serial behind.
+     *
+     * @param array<int,string> $values
+     */
+    public function withhold(array $values): void
+    {
+        $keep = array_filter(array_unique(array_merge($this->withheld, array_map('strval', $values))), static fn (string $v): bool => strlen($v) >= self::WITHHOLD_MIN);
+        usort($keep, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
+        $this->withheld = $keep;
     }
 
     // phase is the name of the work in progress (used as the "phase" of a failure report).
@@ -158,12 +180,12 @@ final class InstallReporter
     /**
      * Report a failure: the failed event {phase, code[, error]}, then the closing result with ok=false.
      * Best effort: the install is already failing and its own error must reach the console.
-     * $error is sent only when non-empty, as errorText() cleaned it.
+     * $error is sent only when non-empty, with the withheld values replaced, as errorText() cleaned and cut it.
      */
     public function failed(string $code, string $error = ''): void
     {
         $detail = ['phase' => $this->phase, 'code' => $code];
-        $error = self::errorText($error);
+        $error = self::errorText($this->withheld === [] ? $error : str_ireplace($this->withheld, self::REDACTED, $error));
         if ($error !== '') {
             $detail['error'] = $error;
         }

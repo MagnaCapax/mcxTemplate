@@ -75,6 +75,11 @@ $_ENV['NETWORK_INTERFACE'] = $interface;
 
 $success = Common::runPhpScript($repoRoot . '/distros/common/create-network-config.php', [], false);
 if (!$success) {
+    // Strict mode (the network install sets it) must not report an install that never got its static address:
+    // the node would come up on the template's network, DHCP (ADR-0011). Without it the old fail-soft behaviour stays.
+    if (trim((string) (getenv('MCX_STRICT') ?: '')) === '1') {
+        Common::fail('Task 22: the network helper failed and strict mode is on.');
+    }
     Common::logWarn('Network helper failed; retaining existing interfaces file.');
     return;
 }

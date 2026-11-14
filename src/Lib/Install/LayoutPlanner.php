@@ -257,7 +257,8 @@ final class LayoutPlanner
         // Read-only proof that the node can boot, while the target is still mounted (BootVerifier).
         $planned = array_values(array_filter([$u['root'], $u['boot'], $u['swap'], $u['home']], static fn (string $x): bool => $x !== ''));
         $steps[] = ['id' => 'verifyBoot', 'argv' => [], 'destructive' => false, 'roles' => [], 'env' => [], 'kind' => 'verify',
-            'uuids' => $planned, 'grubTargets' => $fs['grub'], 'md' => $fs['stopMd']];
+            'uuids' => $planned, 'grubTargets' => $fs['grub'], 'md' => $fs['stopMd'],
+            'hostname' => $plan['host']['fqdn'], 'cidr' => $plan['host']['cidr']];
         // Read-only: the SSH host public keys configure generated, kept for the result so the first login can pin them.
         $steps[] = ['id' => 'hostKeys', 'argv' => [], 'destructive' => false, 'roles' => [], 'env' => [], 'kind' => 'hostKeys'];
 

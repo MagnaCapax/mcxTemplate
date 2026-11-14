@@ -212,7 +212,7 @@ final class Installer
         }
         if ($step['destructive'] === true) {
             foreach ($step['roles'] as $role) {
-                DeviceGuard::assertUnchanged($this->reader, $roles[$role]);
+                DeviceGuard::assertUnchanged($this->reader, $roles[$role], (string) $role);
             }
         }
         $isPassword = $kind === 'password';

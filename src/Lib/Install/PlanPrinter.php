@@ -37,7 +37,7 @@ final class PlanPrinter
             if ($kind === 'writeFile') {
                 $line = sprintf('write %s%s (%d bytes)', LayoutPlanner::TARGET, $step['path'], strlen($step['content']));
             } elseif ($kind === 'verify') {
-                $line = 'verify (read-only): kernel + initrd, grub.cfg, fstab UUIDs against blkid, GRUB boot code on '
+                $line = 'verify (read-only): kernel + initrd, grub.cfg, fstab UUIDs against blkid, /etc/hostname, the static address, GRUB boot code on '
                     . implode(' ', $step['grubTargets']) . ($step['md'] ? ', mdadm.conf lists mcxboot' : '');
             } elseif ($kind === 'hostKeys') {
                 $line = 'read (read-only): ' . LayoutPlanner::TARGET . '/etc/ssh/' . implode(', ', HostKeys::FILES) . ' for the result';

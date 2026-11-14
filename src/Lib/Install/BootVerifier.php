@@ -10,12 +10,14 @@ namespace Lib\Install;
 // Every check reads files under the target root or runs a read-only command
 // (blkid, dd of=-less read of one sector, mdadm --detail) through the READER runner.
 // Any miss is a verifyFailed refusal that names the check.
+// Tasks 21 and 22 (hostname, network) also log a warning and exit 0 when their helper fails in a non-strict run, so the
+// hostname and the static address are read back from the installed files too (ADR-0011).
 final class BootVerifier
 {
     public const SECTOR = 512;
 
     /**
-     * @param array<string,mixed> $step verify step: uuids (planned fstab UUIDs), grubTargets, md
+     * @param array<string,mixed> $step verify step: uuids (planned fstab UUIDs), grubTargets, md, hostname and cidr (as requested)
      */
     public static function verify(CommandRunner $reader, string $targetRoot, array $step): void
     {
@@ -23,6 +25,8 @@ final class BootVerifier
         self::kernel($root);
         self::grubConfig($root);
         self::fstab($reader, $root, $step['uuids']);
+        self::hostname($root, $step['hostname'] ?? null);
+        self::network($root, $step['cidr'] ?? null);
         foreach ($step['grubTargets'] as $device) {
             self::bootCode($reader, (string) $device);
         }
@@ -98,6 +102,46 @@ final class BootVerifier
         }
     }
 
+    // hostname: /etc/hostname holds the requested hostname (hostname.tpl writes it alone on the line).
+    // A task whose helper failed leaves the template's own name behind. Compared whole and without regard to case.
+    private static function hostname(string $root, ?string $requested): void
+    {
+        if ($requested === null || $requested === '') {
+            self::fail('hostname', 'the verify step carries no requested hostname');
+        }
+        $text = @file_get_contents($root . '/etc/hostname');
+        if (!is_string($text)) {
+            self::fail('hostname', '/etc/hostname is missing in the target');
+        }
+        if (strtolower(trim($text)) !== strtolower($requested)) {
+            self::fail('hostname', '/etc/hostname does not hold the requested hostname');
+        }
+    }
+
+    /**
+     * network: the requested static address (CIDR) is configured in the installed system, as Debian's
+     * /etc/network/interfaces ("address <cidr>" on a line of its own) or as an address in a netplan file
+     * (Ubuntu). The match is on the whole token, so 192.0.2.100/24 does not stand in for 192.0.2.10/24, and a
+     * comment line is never the configuration. A template that kept its own DHCP file has neither.
+     */
+    private static function network(string $root, ?string $cidr): void
+    {
+        if ($cidr === null || $cidr === '') {
+            self::fail('network', 'the verify step carries no requested address');
+        }
+        $quoted = preg_quote($cidr, '#');
+        $interfaces = @file_get_contents($root . '/etc/network/interfaces');
+        if (is_string($interfaces) && preg_match('#^[ \t]*address[ \t]+' . $quoted . '[ \t]*$#m', $interfaces) === 1) {
+            return;
+        }
+        foreach (glob($root . '/etc/netplan/*.yaml') ?: [] as $file) {
+            $yaml = @file_get_contents($file);
+            if (is_string($yaml) && preg_match('#^[ \t]*[^\#\n]*addresses:[ \t]*\[[^\]\#\n]*(?<![0-9./])' . $quoted . '(?![0-9])#m', $yaml) === 1) {
+                return;
+            }
+        }
+        self::fail('network', 'neither /etc/network/interfaces nor /etc/netplan holds the requested static address');
+    }
     // bootCode: the first sector of a GRUB target carries the 0x55AA signature and GRUB's boot.img ("GRUB " text).
     private static function bootCode(CommandRunner $reader, string $device): void
     {

@@ -13,16 +13,19 @@ final class DeviceGuard
 
     /**
      * @param array<string,mixed> $expected the matched disk record
+     * @param string              $role     the plan role of the disk (root, boot0, boot1): it names the device in the
+     *                                       refusal, which is reported to nodeCore, so the message never carries a serial
      */
-    public static function assertUnchanged(CommandRunner $runner, array $expected): void
+    public static function assertUnchanged(CommandRunner $runner, array $expected, string $role = ''): void
     {
+        $what = $role === '' ? 'a planned path' : 'the ' . $role . ' disk';
         $now = DiskInventory::enumerate($runner, (string) $expected['path']);
         if (count($now) !== 1 || $now[0]['kname'] !== $expected['kname']) {
-            throw new InstallRefusal('deviceChanged', 'the device behind a planned path is gone or is not a single disk');
+            throw new InstallRefusal('deviceChanged', 'the device behind ' . $what . ' is gone or is not a single disk');
         }
         foreach (self::FIELDS as $field) {
             if ($now[0][$field] !== $expected[$field]) {
-                throw new InstallRefusal('deviceChanged', "the $field behind a planned path changed since the match");
+                throw new InstallRefusal('deviceChanged', "the $field behind $what changed since the match");
             }
         }
     }

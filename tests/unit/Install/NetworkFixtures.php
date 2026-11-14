@@ -125,6 +125,10 @@ final class NetworkWorld
         file_put_contents($this->dir . '/target/etc/fstab', 'UUID=' . $uuid(3) . " / ext4 defaults 0 1\nUUID=" . $uuid(1)
             . " /boot ext4 defaults 0 2\nUUID=" . $uuid(2) . " none swap sw 0 0\n");
         file_put_contents($this->dir . '/target/etc/mdadm/mdadm.conf', "ARRAY /dev/md/mcxboot metadata=1.2 name=rescue:mcxboot UUID=1:2:3:4\n");
+        // The hostname and network files a successful configure writes (the plan of InstallFixtures::rawPlan).
+        mkdir($this->dir . '/target/etc/network', 0755, true);
+        file_put_contents($this->dir . '/target/etc/hostname', "node1.example.test\n");
+        file_put_contents($this->dir . '/target/etc/network/interfaces', "auto eth0\niface eth0 inet static\n    address 192.0.2.10/24\n    gateway 192.0.2.1\n");
 
         $this->server = new FakeNodeCore(self::TEMPLATE);
         $this->server->script('/boot/hello', [FakeNodeCore::ok(['plan' => $this->rawPlan()])]);

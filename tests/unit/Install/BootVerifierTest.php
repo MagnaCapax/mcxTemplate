@@ -14,6 +14,8 @@ final class BootVerifierTest extends TestCase
 {
     private const ROOT_UUID = '00000000-0000-4000-8000-000000000003';
     private const BOOT_UUID = '00000000-0000-4000-8000-000000000001';
+    private const HOSTNAME = 'node1.example.test';
+    private const CIDR = '192.0.2.10/24';
     private const STICK0 = '/dev/disk/by-path/pci-0000:00:14.0-usb-0:3:1.0-scsi-0:0:0:0';
     private const STICK1 = '/dev/disk/by-path/pci-0000:00:14.0-usb-0:4:1.0-scsi-0:0:0:0';
     private string $root = '';
@@ -30,6 +32,10 @@ final class BootVerifierTest extends TestCase
         file_put_contents($this->root . '/etc/fstab', "# a comment UUID=ffffffff-0000-4000-8000-000000000009\n"
             . 'UUID=' . self::ROOT_UUID . " / ext4 defaults 0 1\nUUID=" . self::BOOT_UUID . " /boot ext4 defaults 0 2\nproc /proc proc defaults 0 0\n");
         file_put_contents($this->root . '/etc/mdadm/mdadm.conf', "ARRAY /dev/md/mcxboot metadata=0.90 UUID=1:2:3:4\n");
+        // What tasks 21 and 22 leave behind on a good install: the requested hostname and static address.
+        mkdir($this->root . '/etc/network', 0755, true);
+        file_put_contents($this->root . '/etc/hostname', self::HOSTNAME . "\n");
+        file_put_contents($this->root . '/etc/network/interfaces', "auto eth0\niface eth0 inet static\n    address " . self::CIDR . "\n    gateway 192.0.2.1\n");
     }
 
     protected function tearDown(): void
@@ -62,7 +68,8 @@ final class BootVerifierTest extends TestCase
     private function step(bool $md = true): array
     {
         return ['id' => 'verifyBoot', 'kind' => 'verify', 'uuids' => [self::ROOT_UUID, self::BOOT_UUID],
-            'grubTargets' => [self::STICK0, self::STICK1], 'md' => $md];
+            'grubTargets' => [self::STICK0, self::STICK1], 'md' => $md,
+            'hostname' => self::HOSTNAME, 'cidr' => self::CIDR];
     }
 
     // assertMiss expects verifyFailed naming $check.
@@ -205,5 +212,86 @@ final class BootVerifierTest extends TestCase
         unlink($this->root . '/etc/mdadm/mdadm.conf');
         BootVerifier::verify($this->reader(), $this->root, $this->step(false));
         $this->addToAssertionCount(1);
+    }
+
+    // The visible outcome of tasks 21 and 22, not their helpers' exit codes: both tasks used to log a warning and exit 0
+    // when the helper failed, so the template's own hostname and DHCP network survived unseen (ADR-0011).
+    public function testHostnameFileKeepingTheTemplateNameIsRefused(): void
+    {
+        file_put_contents($this->root . '/etc/hostname', "debian\n");
+        $this->assertMiss('hostname', $this->reader());
+    }
+
+    public function testMissingHostnameFileIsRefused(): void
+    {
+        unlink($this->root . '/etc/hostname');
+        $this->assertMiss('hostname', $this->reader());
+    }
+
+    public function testHostnameIsComparedWholeNotAsAPrefix(): void
+    {
+        file_put_contents($this->root . '/etc/hostname', self::HOSTNAME . ".other.test\n");
+        $this->assertMiss('hostname', $this->reader());
+    }
+
+    public function testHostnameCaseDoesNotMatter(): void
+    {
+        file_put_contents($this->root . '/etc/hostname', strtoupper(self::HOSTNAME) . "\n");
+        BootVerifier::verify($this->reader(), $this->root, $this->step());
+        $this->addToAssertionCount(1);
+    }
+
+    public function testNetworkFileOnDhcpIsRefused(): void
+    {
+        // The template's own interfaces file survived: the node would come up on DHCP, not on its static address.
+        file_put_contents($this->root . '/etc/network/interfaces', "auto eth0\niface eth0 inet dhcp\n");
+        $this->assertMiss('network', $this->reader());
+    }
+
+    public function testMissingNetworkConfigIsRefused(): void
+    {
+        unlink($this->root . '/etc/network/interfaces');
+        $this->assertMiss('network', $this->reader());
+    }
+
+    public function testAnotherAddressWithTheSameTextPrefixIsRefused(): void
+    {
+        // 192.0.2.100/24 contains the text 192.0.2.10: a substring match would accept it.
+        file_put_contents($this->root . '/etc/network/interfaces', "iface eth0 inet static\n    address 192.0.2.100/24\n");
+        $this->assertMiss('network', $this->reader());
+    }
+
+    public function testAnAddressInACommentIsNotTheConfiguredAddress(): void
+    {
+        file_put_contents($this->root . '/etc/network/interfaces', '# address ' . self::CIDR . "\niface eth0 inet dhcp\n");
+        $this->assertMiss('network', $this->reader());
+    }
+
+    public function testANetplanFileWithTheAddressIsAccepted(): void
+    {
+        // Ubuntu: task 22 writes /etc/netplan/01-mcx.yaml and there is no interfaces file.
+        unlink($this->root . '/etc/network/interfaces');
+        mkdir($this->root . '/etc/netplan', 0755, true);
+        file_put_contents($this->root . '/etc/netplan/01-mcx.yaml', "network:\n  version: 2\n  ethernets:\n    eth0:\n      addresses: [" . self::CIDR . "]\n");
+        BootVerifier::verify($this->reader(), $this->root, $this->step());
+        $this->addToAssertionCount(1);
+    }
+
+    public function testANetplanFileWithAnotherAddressIsRefused(): void
+    {
+        unlink($this->root . '/etc/network/interfaces');
+        mkdir($this->root . '/etc/netplan', 0755, true);
+        file_put_contents($this->root . '/etc/netplan/01-mcx.yaml', "network:\n  ethernets:\n    eth0:\n      addresses: [198.51.100.7/24]\n");
+        $this->assertMiss('network', $this->reader());
+    }
+
+    public function testAVerifyStepWithoutTheRequestedHostnameOrAddressIsRefusedNotSkipped(): void
+    {
+        $noHost = $this->step();
+        unset($noHost['hostname']);
+        $this->assertMiss('hostname', $this->reader(), $noHost);
+        $noCidr = $this->step();
+        unset($noCidr['cidr']);
+        $this->assertMiss('network', $this->reader(), $noCidr);
     }
 }

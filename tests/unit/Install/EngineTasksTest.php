@@ -17,7 +17,12 @@ final class EngineTasksTest extends TestCase
         'netplan' => 'distros/ubuntu/common/tasks/22-render-netplan.php',
         'boot' => 'distros/debian/common/tasks/40-update-boot.php',
         'mdadm' => 'distros/debian/common/tasks/32-capture-mdadm.php',
+        'hostname' => 'distros/debian/common/tasks/21-render-hostname-files.php',
+        'hostnameUbuntu' => 'distros/ubuntu/common/tasks/21-render-hostname-files.php',
+        'interfaces' => 'distros/debian/common/tasks/22-render-network-config.php',
     ];
+    // The helpers tasks 21 and 22 run. The engine copy has no templates, so each helper fails before it writes anything.
+    private const HELPERS = ['distros/common/create-hostname.php', 'distros/common/create-network-config.php'];
     private string $base = '';
     private string $root = '';
 
@@ -50,7 +55,7 @@ final class EngineTasksTest extends TestCase
         foreach (['distros/common/lib/Common.php', 'src/Lib/Provisioning/Common.php'] as $file) {
             copy($repo . '/' . $file, $engine . '/' . $file);
         }
-        foreach (self::TASKS as $file) {
+        foreach (array_merge(self::HELPERS, array_values(self::TASKS)) as $file) {
             copy($repo . '/' . $file, $engine . '/' . $file);
         }
     }
@@ -74,6 +79,37 @@ final class EngineTasksTest extends TestCase
     private function resolv(): string
     {
         return $this->root . '/etc/resolv.conf';
+    }
+
+    /** @return array<string,array{0:string,1:array<string,string>,2:string}> task key, its environment, the text of the helper's failure */
+    public static function failingHelpers(): array
+    {
+        $host = ['MCX_FQDN' => 'node1.example.test', 'MCX_SHORT_HOSTNAME' => 'node1', 'MCX_DISTRO_ID' => 'debian'];
+        $net = ['MCX_NETWORK_CIDR' => '192.0.2.10/24', 'MCX_GATEWAY' => '192.0.2.1', 'MCX_PRIMARY_INTERFACE' => 'eth0', 'MCX_DISTRO_ID' => 'debian'];
+        return ['debian hostname' => ['hostname', $host, 'Hostname helper failed'], 'ubuntu hostname' => ['hostnameUbuntu', $host, 'Hostname helper failed'],
+            'debian network' => ['interfaces', $net, 'Network helper failed']];
+    }
+
+    /**
+     * @dataProvider failingHelpers
+     * @param array<string,string> $env
+     */
+    public function testAFailedHelperFailsTheTaskUnderStrictWithAReason(string $task, array $env, string $helperText): void
+    {
+        [$rc, $out] = $this->runTask($task, $env + ['MCX_STRICT' => '1']);
+        $this->assertSame(1, $rc, $out);
+        $this->assertStringContainsString('strict mode', $out, 'the failure says why');
+    }
+
+    /**
+     * @dataProvider failingHelpers
+     * @param array<string,string> $env
+     */
+    public function testAFailedHelperStaysAWarningWithoutStrict(string $task, array $env, string $helperText): void
+    {
+        [$rc, $out] = $this->runTask($task, $env);
+        $this->assertSame(0, $rc, $out);
+        $this->assertStringContainsString($helperText, $out);
     }
 
     public function testResolversAreWrittenAsNameserverLines(): void

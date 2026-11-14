@@ -269,6 +269,109 @@ final class NetworkInstallTest extends TestCase
         $this->assertSame(0, $this->rebootCalls());
     }
 
+    /** @return array<string,mixed> the detail of the failed event nodeCore received last */
+    private function failedDetail(): array
+    {
+        $events = $this->w->server->to('/install/event');
+        $body = end($events)['body'];
+        $this->assertSame('failed', $body['event']);
+        return $body['detail'];
+    }
+
+    // A refusal after the wipe is the case with no console: a node in the install environment has no sshd.
+    public function testVerifyRefusalAfterTheWipeReportsWhichCheckFailed(): void
+    {
+        unlink($this->w->dir . '/target/boot/grub/grub.cfg');
+        $code = $this->refusal(fn () => $this->network()->run(InstallFixtures::MAC, true, true));
+        $this->assertSame('verifyFailed', $code);
+        $detail = $this->failedDetail();
+        $this->assertSame(['phase', 'code', 'error'], array_keys($detail));
+        $this->assertSame('verify', $detail['phase']);
+        $this->assertStringStartsWith('verifyFailed: grubConfig:', $detail['error']);
+        $this->assertSame(0, $this->rebootCalls());
+    }
+
+    // ADR-0011: the installed system kept the template's hostname; the install must now say so, not report success.
+    public function testAnInstalledHostnameThatIsNotTheRequestedOneFailsTheInstallWithTheCheckName(): void
+    {
+        file_put_contents($this->w->dir . '/target/etc/hostname', "debian\n");
+        $code = $this->refusal(fn () => $this->network()->run(InstallFixtures::MAC, true, true));
+        $this->assertSame('verifyFailed', $code);
+        $this->assertStringStartsWith('verifyFailed: hostname:', $this->failedDetail()['error']);
+        $this->assertSame(0, $this->rebootCalls());
+    }
+
+    public function testAnInstalledNetworkConfigWithoutTheRequestedAddressFailsTheInstall(): void
+    {
+        file_put_contents($this->w->dir . '/target/etc/network/interfaces', "auto eth0\niface eth0 inet dhcp\n");
+        $code = $this->refusal(fn () => $this->network()->run(InstallFixtures::MAC, true, true));
+        $this->assertSame('verifyFailed', $code);
+        $this->assertStringStartsWith('verifyFailed: network:', $this->failedDetail()['error']);
+        $this->assertSame(0, $this->rebootCalls());
+    }
+
+    public function testADeviceThatChangedIsNamedByItsRoleAndNeverByItsSerial(): void
+    {
+        $base = $this->w->reader;
+        $this->w->reader = new CallbackRunner(static function (array $argv) use ($base): array {
+            $answer = $base->run($argv);
+            // Only the per-device re-read before a destructive step (lsblk with a path) sees another serial.
+            if ($argv[0] === 'lsblk' && isset($argv[6])) {
+                $answer['out'] = str_replace('NVME-ROOT-1', 'OTHER-SERIAL-9', $answer['out']);
+            }
+            return $answer;
+        });
+        $code = $this->refusal(fn () => $this->network()->run(InstallFixtures::MAC, true, true));
+        $this->assertSame('deviceChanged', $code);
+        $detail = $this->failedDetail();
+        $this->assertSame('wipe', $detail['phase']);
+        $this->assertStringStartsWith('deviceChanged:', $detail['error']);
+        $this->assertStringContainsString('root', $detail['error']);
+        $this->assertStringNotContainsString('OTHER-SERIAL-9', $detail['error']);
+        $this->assertStringNotContainsString('NVME-ROOT-1', $detail['error']);
+    }
+
+    // The code comment's rule stays: a serial or the token that a refusal message happens to carry is not sent.
+    public function testSerialsAndTheTokenAreRedactedFromAReportedRefusal(): void
+    {
+        $this->w->server->downloadError = 'curl: failed for NVME-ROOT-1 and tok-SECRETTOKEN-0123456789 (nvme-root-1)';
+        $code = $this->refusal(fn () => $this->network()->run(InstallFixtures::MAC, true, true));
+        $this->assertSame('templateDownloadFailed', $code);
+        $detail = $this->failedDetail();
+        $this->assertSame('download', $detail['phase']);
+        $this->assertStringStartsWith('templateDownloadFailed: download failed: curl: failed for', $detail['error']);
+        $this->assertStringContainsString('[redacted]', $detail['error']);
+        foreach (['NVME-ROOT-1', 'nvme-root-1', 'SECRETTOKEN'] as $secret) {
+            $this->assertStringNotContainsString($secret, $detail['error']);
+        }
+    }
+
+    public function testAReportedRefusalDetailIsBounded(): void
+    {
+        $this->w->server->downloadError = str_repeat('x', 5000);
+        $this->refusal(fn () => $this->network()->run(InstallFixtures::MAC, true, true));
+        $error = $this->failedDetail()['error'];
+        $this->assertLessThanOrEqual(\Lib\Install\InstallReporter::ERROR_MAX, strlen($error));
+        $this->assertStringStartsWith('templateDownloadFailed:', $error);
+    }
+
+    // An unexpected exception can carry anything in its message, so only its class and where it was thrown are sent.
+    public function testAnInternalErrorReportsItsClassAndPlaceNotItsMessage(): void
+    {
+        $boom = static function (string $dir): int {
+            throw new \LogicException('boom NVME-ROOT-1 tok-SECRETTOKEN-0123456789');
+        };
+        try {
+            $this->network([], $boom)->run(InstallFixtures::MAC, true, true);
+            $this->fail('the internal error was swallowed');
+        } catch (\LogicException $e) {
+            $this->assertStringContainsString('boom', $e->getMessage(), 'the console still gets the exception');
+        }
+        $detail = $this->failedDetail();
+        $this->assertSame('internalError', $detail['code']);
+        $this->assertMatchesRegularExpression('/^LogicException at [A-Za-z0-9_.]+:\d+$/D', $detail['error']);
+    }
+
     public function testNoSpaceRefusesBeforeDownloadingAndSaysSo(): void
     {
         $code = $this->refusal(fn () => $this->network([], static fn (string $d) => 1000)->run(InstallFixtures::MAC, true, true));

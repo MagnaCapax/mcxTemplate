@@ -220,6 +220,9 @@ final class LayoutPlannerTest extends TestCase
         $this->assertSame(['00000000-0000-4000-8000-000000000003', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000002'], $verify['uuids']);
         $this->assertSame(['/dev/disk/by-path/pci-0000:00:14.0-usb-0:3:1.0-scsi-0:0:0:0', '/dev/disk/by-path/pci-0000:00:14.0-usb-0:4:1.0-scsi-0:0:0:0'], $verify['grubTargets']);
         $this->assertTrue($verify['md']);
+        // The requested hostname and static address, so the verification reads the visible outcome (ADR-0011).
+        $this->assertSame('node1.example.test', $verify['hostname']);
+        $this->assertSame('192.0.2.10/24', $verify['cidr']);
         $this->assertFalse($this->step($this->singleSteps(), 'verifyBoot')['md']);
         $this->assertContains('00000000-0000-4000-8000-000000000004', $this->step($this->singleSteps(true), 'verifyBoot')['uuids'], 'the /home UUID is verified too');
     }

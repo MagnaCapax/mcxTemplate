@@ -247,7 +247,9 @@ final class NetworkInstallTest extends TestCase
         $events = $this->w->server->to('/install/event');
         $failed = end($events)['body'];
         $this->assertSame('failed', $failed['event']);
-        $this->assertSame(['phase' => 'checkTemplate', 'code' => 'templateHashMismatch'], $failed['detail']);
+        // ADR-0012: a refusal before the wipe carries its reason too, not the code alone.
+        $this->assertSame(['phase' => 'checkTemplate', 'code' => 'templateHashMismatch',
+            'error' => 'templateHashMismatch: template sha256 differs from the plan'], $failed['detail']);
         $this->assertSame(['planned', 'downloaded', 'failed'], $this->w->server->eventNames());
         $results = $this->w->server->to('/install/result');
         $this->assertFalse($results[0]['body']['ok']);

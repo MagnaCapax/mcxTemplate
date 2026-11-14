@@ -23,6 +23,8 @@ final class Installer
     private $uuid;
     private string $targetRoot;
     private string $stageRoot;
+    /** @var array<int,string> SSH host public keys of the installed system, read by the hostKeys step */
+    private array $hostKeys = [];
 
     public function __construct(CommandRunner $reader, CommandRunner $writer, SystemStateReader $stateReader,
         ?callable $uuid = null, string $targetRoot = LayoutPlanner::TARGET, string $stageRoot = self::STAGE_ROOT)
@@ -125,6 +127,17 @@ final class Installer
         return $this->perform($plan, $prepared, null, $say);
     }
 
+    /**
+     * SSH host public keys the last execute run read from the installed system ("type base64"); empty before
+     * that step ran or when the system has none usable (HostKeys).
+     *
+     * @return array<int,string>
+     */
+    public function hostKeys(): array
+    {
+        return $this->hostKeys;
+    }
+
     // perform is the shared body: $secretOut null keeps the password in memory and returns it.
     private function perform(array $plan, array $prepared, ?string $secretOut, callable $say): string
     {
@@ -191,6 +204,10 @@ final class Installer
         }
         if ($kind === 'verify') {
             BootVerifier::verify($this->reader, $this->targetRoot, $step);
+            return;
+        }
+        if ($kind === 'hostKeys') {
+            $this->hostKeys = HostKeys::read($this->targetRoot);
             return;
         }
         if ($step['destructive'] === true) {

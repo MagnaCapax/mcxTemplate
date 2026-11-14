@@ -26,7 +26,7 @@ final class InstallerTest extends TestCase
     protected function setUp(): void
     {
         $this->dir = sys_get_temp_dir() . '/mcx-installer-' . bin2hex(random_bytes(4));
-        foreach (['/sys/class/net/eth0/device', '/proc/self', '/target/etc/mdadm', '/target/boot/grub'] as $sub) {
+        foreach (['/sys/class/net/eth0/device', '/proc/self', '/target/etc/mdadm', '/target/etc/ssh', '/target/boot/grub'] as $sub) {
             mkdir($this->dir . $sub, 0755, true);
         }
         file_put_contents($this->dir . '/sys/class/net/eth0/address', InstallFixtures::MAC . "\n");
@@ -37,6 +37,7 @@ final class InstallerTest extends TestCase
         file_put_contents($this->dir . '/target/boot/vmlinuz-6.1.0-test', 'kernel');
         file_put_contents($this->dir . '/target/boot/initrd.img-6.1.0-test', 'initrd');
         file_put_contents($this->dir . '/target/boot/grub/grub.cfg', "menuentry x {}\n");
+        file_put_contents($this->dir . '/target/etc/ssh/ssh_host_ed25519_key.pub', InstallFixtures::hostKey() . " root@rescue\n");
         file_put_contents($this->dir . '/target/etc/fstab', "UUID=" . self::uuid(3) . " / ext4 defaults 0 1\n"
             . "UUID=" . self::uuid(1) . " /boot ext4 defaults 0 2\nUUID=" . self::uuid(2) . " none swap sw 0 0\n");
         file_put_contents($this->dir . '/target/etc/mdadm/mdadm.conf', "ARRAY /dev/md/mcxboot metadata=1.2 name=rescue:mcxboot UUID=1:2:3:4\n");
@@ -281,12 +282,13 @@ final class InstallerTest extends TestCase
 
         $expected = [];
         foreach ($prepared['steps'] as $step) {
-            if (!in_array($step['kind'] ?? '', ['writeFile', 'verify'], true)) {
+            if (!in_array($step['kind'] ?? '', ['writeFile', 'verify', 'hostKeys'], true)) {
                 $expected[] = $step['argv'];
             }
         }
         $this->assertSame($expected, $writer->argvList());
         $this->assertSame(array_column($prepared['steps'], 'id'), $seen);
+        $this->assertSame([InstallFixtures::hostKey()], $installer->hostKeys(), 'the host key is read from the target, not run as a command');
         $this->assertSame("nameserver 198.51.100.2\nnameserver 198.51.100.3\n", file_get_contents($this->dir . '/target/etc/resolv.conf'));
         $this->assertDirectoryDoesNotExist($this->stageDir(), 'the staged copy is removed after the run');
 

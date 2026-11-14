@@ -126,6 +126,8 @@ final class NetworkInstall
             $reporter->stepStarted($id);
         });
         $reporter->finishSteps();
+        // Public keys only, sent with the result so the first login to the installed node can pin them (HostKeys).
+        $facts['hostKeys'] = $this->installer->hostKeys();
         return [$password, $facts];
     }
 

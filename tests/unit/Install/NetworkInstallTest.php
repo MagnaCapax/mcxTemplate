@@ -146,6 +146,17 @@ final class NetworkInstallTest extends TestCase
         $this->assertSame('installed', $result['code']);
         $this->assertSame('Debian GNU/Linux 12 (bookworm)', $result['facts']['osRelease']);
         $this->assertSame('00000000-0000-4000-8000-000000000003', $result['facts']['rootUuid']);
+        $this->assertSame([InstallFixtures::hostKey()], $result['facts']['hostKeys'], 'the installed host key travels with the result, comment dropped');
+    }
+
+    // A system without a usable host key still installs (fail-soft); the empty list tells the verifier there is nothing to pin.
+    public function testMissingHostKeysStillDeliverTheResultWithAnEmptyList(): void
+    {
+        unlink($this->w->dir . '/target/etc/ssh/ssh_host_ed25519_key.pub');
+        $this->assertSame(0, $this->network()->run(InstallFixtures::MAC, true, false));
+        $result = $this->w->server->to('/install/result')[0]['body'];
+        $this->assertTrue($result['ok']);
+        $this->assertSame([], $result['facts']['hostKeys']);
     }
 
     // On real templates etc/os-release is a symlink, which tar -xO prints as nothing; the fact must come from

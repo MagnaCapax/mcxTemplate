@@ -12,7 +12,7 @@ namespace Lib\Install;
 //
 // Step shape: id, argv, destructive (bool), roles (disks whose identity must be
 // re-read right before the step), env (extra environment), and optionally
-// kind ('writeFile', 'password', 'configure', 'verify') for steps the executor
+// kind ('writeFile', 'password', 'configure', 'verify', 'hostKeys') for steps the executor
 // handles specially.
 final class LayoutPlanner
 {
@@ -258,6 +258,8 @@ final class LayoutPlanner
         $planned = array_values(array_filter([$u['root'], $u['boot'], $u['swap'], $u['home']], static fn (string $x): bool => $x !== ''));
         $steps[] = ['id' => 'verifyBoot', 'argv' => [], 'destructive' => false, 'roles' => [], 'env' => [], 'kind' => 'verify',
             'uuids' => $planned, 'grubTargets' => $fs['grub'], 'md' => $fs['stopMd']];
+        // Read-only: the SSH host public keys configure generated, kept for the result so the first login can pin them.
+        $steps[] = ['id' => 'hostKeys', 'argv' => [], 'destructive' => false, 'roles' => [], 'env' => [], 'kind' => 'hostKeys'];
 
         foreach (array_reverse($binds) as [$src, $dst]) {
             $steps[] = self::step('unbind' . str_replace('/', '', $dst), ['umount', $t . $dst], false);

@@ -61,7 +61,7 @@ final class LayoutPlannerTest extends TestCase
     {
         $ids = $this->ids($this->singleSteps());
         $order = ['rootWipefs', 'rootZap', 'rootZeroHead', 'rootZeroTail', 'rootReread', 'partition', 'mkfsBoot', 'mkswap', 'mkfsRoot',
-            'mountRoot', 'mountBoot', 'extract', 'resolvConf', 'rootPassword', 'configure', 'verifyBoot', 'umountBoot', 'umountRoot', 'sync'];
+            'mountRoot', 'mountBoot', 'extract', 'resolvConf', 'rootPassword', 'configure', 'verifyBoot', 'hostKeys', 'umountBoot', 'umountRoot', 'sync'];
         $last = -1;
         foreach ($order as $id) {
             $pos = array_search($id, $ids, true);

@@ -111,7 +111,7 @@ final class NetworkWorld
     public function __construct()
     {
         $this->dir = sys_get_temp_dir() . '/mcx-net-' . bin2hex(random_bytes(4));
-        foreach (['/sys/class/net/eth0/device', '/proc/self', '/target/etc/mdadm', '/target/boot/grub'] as $sub) {
+        foreach (['/sys/class/net/eth0/device', '/proc/self', '/target/etc/mdadm', '/target/etc/ssh', '/target/boot/grub'] as $sub) {
             mkdir($this->dir . $sub, 0755, true);
         }
         file_put_contents($this->dir . '/sys/class/net/eth0/address', InstallFixtures::MAC . "\n");
@@ -120,6 +120,7 @@ final class NetworkWorld
         file_put_contents($this->dir . '/target/boot/vmlinuz-6.1.0-test', 'kernel');
         file_put_contents($this->dir . '/target/boot/initrd.img-6.1.0-test', 'initrd');
         file_put_contents($this->dir . '/target/boot/grub/grub.cfg', "menuentry x {}\n");
+        file_put_contents($this->dir . '/target/etc/ssh/ssh_host_ed25519_key.pub', InstallFixtures::hostKey() . " root@rescue\n");
         $uuid = static fn (int $n): string => sprintf('00000000-0000-4000-8000-%012d', $n);
         file_put_contents($this->dir . '/target/etc/fstab', 'UUID=' . $uuid(3) . " / ext4 defaults 0 1\nUUID=" . $uuid(1)
             . " /boot ext4 defaults 0 2\nUUID=" . $uuid(2) . " none swap sw 0 0\n");

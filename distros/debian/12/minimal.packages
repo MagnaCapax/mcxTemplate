@@ -21,3 +21,4 @@ ca-certificates    # needed by tasks 24 and 26 when given https URIs (PHP verifi
 dbus               # needed by the installed server: systemd-logind (power button, sessions), hostnamectl, timedatectl and systemctl poweroff talk over the system bus
 systemd-timesyncd  # needed by the installed server: a synced clock for TLS certificate validity (ca-certificates) and true log times; minbase has no time sync
 cron               # needed by the installed server: crontab and /etc/cron.d jobs, which a stock Debian install (cron is Priority important) runs; minbase has no cron
+smartmontools      # needed by the installed server: smartctl reads SATA and NVMe health (wear, media errors, temperature) for the post-install hardware check and later drive monitoring; minbase has none

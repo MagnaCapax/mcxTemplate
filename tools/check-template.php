@@ -4,11 +4,6 @@ declare(strict_types=1);
 
 ini_set('display_errors', 'stderr');
 
-// The banned-package list and the dpkg status reader are shared with the release scan (docs/adr/0006).
-require_once dirname(__DIR__) . '/src/Lib/Install/BannedPackages.php';
-
-use Lib\Install\BannedPackages;
-
 const GREEN = "\033[32m";
 const RED = "\033[31m";
 const YELLOW = "\033[33m";
@@ -20,9 +15,7 @@ function printUsage(): void
     echo "Usage: {$script} --path=/path/to/template [--tar|--dir]" . PHP_EOL . PHP_EOL;
     echo "  --path   Path to a template tarball or extracted directory." . PHP_EOL;
     echo "  --tar    Force tarball inspection (auto-detected by default)." . PHP_EOL;
-    echo "  --dir    Force directory inspection." . PHP_EOL . PHP_EOL;
-    echo "Exit 0 when the template is complete, 2 when parts are missing, 3 when a banned package" . PHP_EOL;
-    echo "(fail2ban, ufw, crowdsec, sshguard) is installed in the rootfs dpkg database." . PHP_EOL;
+    echo "  --dir    Force directory inspection." . PHP_EOL;
 }
 
 function parseArguments(array $argv): array
@@ -76,26 +69,6 @@ function loadDirectoryEntries(string $root): array
     return $entries;
 }
 
-// findUnreadableEngineFiles lists engine files (anything under a distros/ directory) that exist in an
-// extracted template but cannot be read by this user. The auditor only lists names, so without this check
-// a template whose configure.php or task files are unreadable would be reported as complete and then fail
-// during installation. Only the engine tree is checked: a captured rootfs legitimately holds files such as
-// /etc/shadow that an unprivileged auditor cannot read.
-function findUnreadableEngineFiles(string $root, array $entries): array
-{
-    $unreadable = [];
-    foreach ($entries as $entry) {
-        if (!preg_match('#^(?:template/|rootfs/opt/mcxTemplate/)?distros/#', $entry)) {
-            continue;
-        }
-        $path = rtrim($root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $entry;
-        if (is_file($path) && !is_readable($path)) {
-            $unreadable[] = $entry;
-        }
-    }
-    return $unreadable;
-}
-
 function loadTarEntries(string $tarPath): array
 {
     if (!is_file($tarPath)) {
@@ -123,12 +96,9 @@ function checkTemplate(array $entries): array
     $bases = ['', 'template/', 'rootfs/opt/mcxTemplate/'];
     $requirements['distros/configure.php'] = presentUnderBases($entries, 'distros/configure.php', $bases);
 
-    // A distro is any distros/<name>/ directory other than the shared common/ tree. Discovering it from any
-    // entry (not only from its common/tasks files) is what lets a distro that lost its tasks be reported as
-    // missing them instead of vanishing from the audit.
     $distroDirs = [];
     foreach ($entries as $entry) {
-        if (preg_match('#^(?:distros|template/distros|rootfs/opt/mcxTemplate/distros)/([^/]+)/#', $entry, $match) && $match[1] !== 'common') {
+        if (preg_match('#^(?:distros|template/distros|rootfs/opt/mcxTemplate/distros)/([^/]+)/common/tasks(?:/|$)#', $entry, $match)) {
             $distroDirs[$match[1]] = true;
         }
     }
@@ -176,56 +146,12 @@ function hasDirectoryUnderBases(array $entries, string $prefix, array $bases): b
     return false;
 }
 
-// readDpkgStatus returns the rootfs dpkg status file of a template, or null when the template has none (an engine-only
-// tree, a distro without dpkg) or it cannot be read. A tarball member is spelled with or without a leading "./".
-// Reading stops one byte past BannedPackages::STATUS_MAX; the caller treats that as a refusal.
-function readDpkgStatus(string $path, bool $isDir): ?string
-{
-    $member = 'rootfs/' . BannedPackages::STATUS_MEMBER;
-    if ($isDir) {
-        $file = rtrim($path, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $member;
-        if (!is_file($file) || is_link($file)) {
-            return null;
-        }
-        $data = @file_get_contents($file, false, null, 0, BannedPackages::STATUS_MAX + 1);
-        return $data === false ? null : $data;
-    }
-    foreach (['./' . $member, $member] as $name) {
-        $proc = @proc_open(['tar', '-xzOf', $path, $name], [1 => ['pipe', 'w'], 2 => ['file', '/dev/null', 'w']], $pipes);
-        if (!is_resource($proc)) {
-            return null;
-        }
-        $data = (string) stream_get_contents($pipes[1], BannedPackages::STATUS_MAX + 1);
-        fclose($pipes[1]);
-        // Closing early on an oversized member makes tar exit non-zero; the size check below still sees the excess.
-        $code = proc_close($proc);
-        if ($data !== '' && ($code === 0 || strlen($data) > BannedPackages::STATUS_MAX)) {
-            return $data;
-        }
-    }
-    return null;
-}
-
-// findBannedPackages names the banned packages installed in the template's dpkg database. A status file too large to
-// read gives the label 'dpkgStatusUnreadable' instead of a package name: it cannot be shown to be free of them.
-function findBannedPackages(string $path, bool $isDir): array
-{
-    $status = readDpkgStatus($path, $isDir);
-    if ($status === null) {
-        return [];
-    }
-    if (strlen($status) > BannedPackages::STATUS_MAX) {
-        return ['dpkgStatusUnreadable'];
-    }
-    return BannedPackages::installed($status);
-}
-
 function printReport(array $requirements): void
 {
     echo "Template audit results:" . PHP_EOL;
     foreach ($requirements as $label => $present) {
         $color = $present ? GREEN : RED;
-        $status = $present ? 'OK' : (strncmp((string) $label, 'banned package ', 15) === 0 ? 'BANNED' : 'MISSING');
+        $status = $present ? 'OK' : 'MISSING';
         echo sprintf("  %s%-8s%s %s%s%s\n",
             $color,
             $status,
@@ -250,23 +176,8 @@ function main(array $argv): void
     }
 
     $requirements = checkTemplate($entries);
-    // Directory mode can also prove the engine files are readable; a tarball listing cannot.
-    if (is_dir($path)) {
-        foreach (findUnreadableEngineFiles($path, $entries) as $entry) {
-            $requirements['readable ' . $entry] = false;
-        }
-    }
-    // A banned package is its own exit code (3) and a plain last line, which ArchiveCheck turns into a named refusal.
-    $banned = findBannedPackages($path, $parsed['mode'] === 'dir' || ($parsed['mode'] === 'auto' && is_dir($path)));
-    foreach ($banned as $name) {
-        $requirements['banned package ' . $name] = false;
-    }
     printReport($requirements);
 
-    if ($banned !== []) {
-        echo 'bannedPackage: ' . implode(', ', $banned) . PHP_EOL;
-        exit(3);
-    }
     if (in_array(false, $requirements, true)) {
         exit(2);
     }

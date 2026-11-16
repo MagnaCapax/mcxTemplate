@@ -15,20 +15,10 @@ crafting new templates.
 * `templateAssemble.php` – Stage a remote system into a local workspace,
   bundle the templating engine (rehydration), and package the combination as a template.
 * `check-template.php` – Audit a template directory or tarball and flag missing
-  distro assets before deployment. It also exits 3 when the rootfs dpkg database
-  has `fail2ban`, `ufw`, `crowdsec` or `sshguard` installed (ADR-0006).
+  distro assets before deployment.
 * `lib/packageCommon.php` – Internal helper library shared by the tooling. You
   rarely invoke it directly, but all scripts depend on its checks and
   path-handling helpers.
-
-## Input rules (ADR 0003)
-
-* An existing output file is never replaced unless `--force` is given
-  (templateAssemble, templateRehydrate, templateCloneRemote).
-* An empty or missing path value is an error, never the current directory.
-* Host, user and `user@host` values must start with a letter, digit or
-  underscore; values ssh or rsync would read as options are refused before any
-  remote work starts.
 
 ## Getting Started
 
@@ -158,7 +148,7 @@ permission to read the entire file system tree.
 ### Synopsis
 
 ```bash
-php tools/templateAssemble.php --source-host <host> --source-user <user> [--embed-into-rootfs|--no-embed-into-rootfs] [--embed-force] [--template <path>] [--output <path>] [--force] [--ssh-option <opt>]...
+php tools/templateAssemble.php --source-host <host> --source-user <user> [--embed-into-rootfs|--no-embed-into-rootfs] [--embed-force] [--template <path>] [--output <path>] [--ssh-option <opt>]...
 ```
 
 ### Usage
@@ -231,7 +221,7 @@ contains the mcxTemplate engine. It uses the shared rehydration helpers, matchin
 
 ```bash
 php tools/templateRehydrate.php --rootfs /path/rootfs.tar.gz [--output /path/template.tar.gz|--output -] \
-    [--template /path/to/mcxTemplate] [--embed-into-rootfs|--no-embed-into-rootfs] [--embed-force] [--force]
+    [--template /path/to/mcxTemplate] [--embed-into-rootfs|--no-embed-into-rootfs] [--embed-force]
 ```
 
 ### Usage
@@ -282,47 +272,3 @@ With defaults, the engine is embedded at `/mnt/target/opt/mcxTemplate` after ext
 - `chroot /mnt/target /usr/bin/env -i HOME=/root PATH=/usr/bin:/usr/sbin:/bin:/sbin bash -c "php /opt/mcxTemplate/installTemplate.php --hostname=example1.dc.local --network-cidr=192.0.2.10/24 --gateway=192.0.2.1 --mount=/,/dev/sda1 --mount=swap,/dev/sda2"`
 
 5) Unmount and reboot into the installed system
-
-## templateBuildDebian.php (build from the Debian or Ubuntu archive)
-
-`templateBuildDebian.php` builds a root filesystem archive from the Debian or Ubuntu archive with
-`mmdebstrap` instead of capturing a machine ([ADR-0007](../docs/adr/0007-templates-may-be-built-from-the-debian-archive.md),
-[ADR-0010](../docs/adr/0010-templatebuilddebian-builds-ubuntu-from-its-archive-with-written-out-apt-sources.md)).
-A capture carries whatever the source machine had installed; a build carries only the
-`minbase` variant plus a reviewed package list. Captures stay supported.
-
-### Dependencies
-
-* `php`, run as root (`mmdebstrap` needs root to give the files their real owners)
-* `mmdebstrap` and network access to a Debian mirror
-* An Ubuntu build also needs the `ubuntu-keyring` package on the build host
-
-### Synopsis
-
-```bash
-php tools/templateBuildDebian.php --suite=bookworm --packages=distros/debian/12/minimal.packages \
-    --out=/srv/build/debian-12-minimal-rootfs.tar.gz [--mirror=http://deb.debian.org/debian]
-
-# Ubuntu 24.04: the sources are written out, with the -updates and -security pockets
-php tools/templateBuildDebian.php --suite=noble --packages=distros/ubuntu/24.04/minimal.packages \
-    --out=/srv/build/ubuntu-24.04-minimal-rootfs.tar.gz --mirror=http://archive.ubuntu.com/ubuntu \
-    --components=main,universe --pockets=updates,security --keyring=/usr/share/keyrings/ubuntu-archive-keyring.gpg
-```
-
-* The package list has one package per line, each followed by `# needed by <code>` naming
-  what requires it; a line without it is refused. Recommends are not installed.
-* A banned package (`src/Lib/Install/BannedPackages.php`, ADR-0006: SSH brute-force blockers and host
-  firewalls) is refused in the list, and the built image's dpkg status is checked again before
-  the archive is written.
-* Three files are written into the image: `/etc/hostname` (`localhost`) and an empty
-  `/etc/resolv.conf`, so nothing of the build host ends up in a published template (the install
-  rewrites both), and `/etc/ssh/sshd_config.d/50-mcxtemplate-root-login.conf` with
-  `PermitRootLogin yes`, so root logs in with the password the install sets.
-* `--mirror` ends up in the image's apt sources: use a mirror the installed machines can reach.
-* `--components`, `--pockets` and `--keyring` (all need `--mirror`) write each apt source out as
-  `deb [signed-by=<keyring>] <mirror> <suite>[-<pocket>] <components>`. mmdebstrap adds the
-  updates and security pockets for a Debian suite by itself, not for an Ubuntu one. The keyring file
-  must exist on the build host and, at the same path, in the image (`ubuntu-keyring`).
-* `--out` is never replaced. Output is one JSON line: suite, installed package count, bytes,
-  sha256 and path. The archive has no `rootfs/` prefix; release it with
-  `tools/templateRelease.php --rootfs=<out> ...`.

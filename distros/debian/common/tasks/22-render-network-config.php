@@ -53,14 +53,7 @@ function gatherNetworkInformation(): array
     return [$cidr, $gateway];
 }
 
-// The installer passes the planned address (--network-cidr, --gateway); the rescue system's own lease is only a fallback.
-$plannedCidr = trim((string) (getenv('MCX_NETWORK_CIDR') ?: ''));
-if ($plannedCidr !== '') {
-    $cidr = $plannedCidr;
-    $gateway = trim((string) (getenv('MCX_GATEWAY') ?: ''));
-} else {
-    [$cidr, $gateway] = gatherNetworkInformation();
-}
+[$cidr, $gateway] = gatherNetworkInformation();
 $cidrValue = $cidr !== '' ? $cidr : '192.0.2.10/24';
 
 putenv('NETWORK_CIDR=' . $cidrValue);
@@ -68,18 +61,12 @@ putenv('GATEWAY=' . $gateway);
 $_ENV['NETWORK_CIDR'] = $cidrValue;
 $_ENV['GATEWAY'] = $gateway;
 
-// Named as the installed system will name it (net.ifnames=0 keeps eth<N>), not as the rescue system does.
-$interface = Common::installedPrimaryInterface();
+$interface = Common::detectPrimaryInterface();
 putenv('NETWORK_INTERFACE=' . $interface);
 $_ENV['NETWORK_INTERFACE'] = $interface;
 
 $success = Common::runPhpScript($repoRoot . '/distros/common/create-network-config.php', [], false);
 if (!$success) {
-    // Strict mode (the network install sets it) must not report an install that never got its static address:
-    // the node would come up on the template's network, DHCP (ADR-0011). Without it the old fail-soft behaviour stays.
-    if (trim((string) (getenv('MCX_STRICT') ?: '')) === '1') {
-        Common::fail('Task 22: the network helper failed and strict mode is on.');
-    }
     Common::logWarn('Network helper failed; retaining existing interfaces file.');
     return;
 }

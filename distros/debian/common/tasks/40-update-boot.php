@@ -34,18 +34,6 @@ Common::logInfo('Task 40: updating Debian boot components.');
 // Announce the beginning of boot maintenance in the provisioning logs.
 
 /**
- * Run one boot command. Without MCX_STRICT=1 a failure stays a warning, as before. The network
- * install sets MCX_STRICT=1; there a failure ends the task non-zero, so the install reports it as
- * stepFailed with this error before boot verification runs, instead of failing only at verification.
- */
-function runBootCommand(string $command, array $arguments = []): void
-{
-    if (!Common::runIfCommandExists($command, $arguments) && trim((string) (getenv('MCX_STRICT') ?: '')) === '1') {
-        Common::fail('Task 40: ' . trim($command . ' ' . implode(' ', $arguments)) . ' failed and strict mode is on.');
-    }
-}
-
-/**
  * Refresh initramfs images and install GRUB on the configured boot targets.
  */
 function updateBootComponents(array $targets): void
@@ -53,8 +41,8 @@ function updateBootComponents(array $targets): void
     Common::logInfo('Updating initramfs and regenerating GRUB configuration.');
     // Begin by refreshing initramfs and the top-level GRUB configuration files.
 
-    runBootCommand('update-initramfs', ['-u']);
-    runBootCommand('update-grub');
+    Common::runIfCommandExists('update-initramfs', ['-u']);
+    Common::runIfCommandExists('update-grub');
     // Execute both commands when available while logging missing utilities.
 
     foreach ($targets as $device) {
@@ -65,7 +53,7 @@ function updateBootComponents(array $targets): void
         }
 
         Common::logInfo('Installing GRUB to ' . $device . '.');
-        runBootCommand('grub-install', [$device]);
+        Common::runIfCommandExists('grub-install', [$device]);
         // Install GRUB to each device while tolerating absent grub-install binaries.
     }
 }

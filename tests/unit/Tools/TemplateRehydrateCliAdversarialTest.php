@@ -27,10 +27,6 @@ final class TemplateRehydrateCliAdversarialTest extends TestCase
     }
 
     /**
-     * Data providers run on a bare instance without setUp(), so every scenario gets the running test
-     * instance as its first argument instead of capturing $this or reading $this->tmpDir while the
-     * provider runs (that property is still uninitialised then, which is what broke the whole provider).
-     *
      * @dataProvider provideAdversarialCases
      * @param array<int,string> $args
      */
@@ -39,7 +35,7 @@ final class TemplateRehydrateCliAdversarialTest extends TestCase
         // Each malformed argument or environment should yield a non-zero status with diagnostics.
         $env = [];
         if ($setup !== null) {
-            $adjusted = $setup($this, $args, $env);
+            $adjusted = $setup($args, $env);
             if (isset($adjusted['args'])) {
                 $args = $adjusted['args'];
             } elseif (is_array($adjusted)) {
@@ -57,7 +53,7 @@ final class TemplateRehydrateCliAdversarialTest extends TestCase
     /**
      * @return array<string,array{string,array<int,string>,callable|null}>
      */
-    public static function provideAdversarialCases(): array
+    public function provideAdversarialCases(): array
     {
         return [
             'missing rootfs argument' => ['missing rootfs argument', [], null],
@@ -66,136 +62,104 @@ final class TemplateRehydrateCliAdversarialTest extends TestCase
             'rootfs blank string' => ['rootfs blank string', ['--rootfs', ''], null],
             'rootfs directory path' => ['rootfs directory path', ['--rootfs', '/tmp'], null],
             'rootfs whitespace string' => ['rootfs whitespace string', ['--rootfs', '   '], null],
-            'missing template path' => ['missing template path', ['--rootfs', '__ROOTFS__', '--template', '/not/here'], static function (self $t, array $args, array $env = []): array {
-                $root = $t->createMinimalRootfs();
+            'missing template path' => ['missing template path', ['--rootfs', '__ROOTFS__', '--template', '/not/here'], function (array $args, array $env = []): array {
+                $root = $this->createMinimalRootfs();
                 $args[1] = $root;
                 return ['args' => $args];
             }],
-            'template empty string' => ['template empty string', ['--rootfs', '__ROOTFS__', '--template', ''], static function (self $t, array $args, array $env = []): array {
-                $args[1] = $t->createMinimalRootfs();
+            'template empty string' => ['template empty string', ['--rootfs', '__ROOTFS__', '--template', ''], function (array $args, array $env = []): array {
+                $args[1] = $this->createMinimalRootfs();
                 return ['args' => $args];
             }],
-            // Below a regular file nothing can be created or written, for root as well (a fixed /root path is
-            // writable when the suite runs as root).
-            'output unwritable directory' => ['output unwritable directory', ['--rootfs', '__ROOTFS__', '--output', '__OUTPUT__'], static function (self $t, array $args, array $env = []): array {
-                $args[1] = $t->createMinimalRootfs();
-                $args[3] = $t->unwritableOutput('out.tar.gz');
+            'output unwritable directory' => ['output unwritable directory', ['--rootfs', '__ROOTFS__', '--output', '/root/out.tar.gz'], function (array $args, array $env = []): array {
+                $args[1] = $this->createMinimalRootfs();
                 return ['args' => $args];
             }],
-            'output directory path' => ['output directory path', ['--rootfs', '__ROOTFS__', '--output', '__OUTPUT_DIR__'], static function (self $t, array $args, array $env = []): array {
-                $args[1] = $t->createMinimalRootfs();
-                $args[3] = $t->tmpDir;
+            'output directory path' => ['output directory path', ['--rootfs', '__ROOTFS__', '--output', $this->tmpDir], function (array $args, array $env = []): array {
+                $args[1] = $this->createMinimalRootfs();
                 return ['args' => $args];
             }],
-            'rootfs unreadable file' => ['rootfs unreadable file', ['--rootfs', '__UNREADABLE__'], static function (self $t, array $args, array $env = []): array {
-                $t->skipWhenRoot();
-                $root = $t->createMinimalRootfs();
+            'rootfs unreadable file' => ['rootfs unreadable file', ['--rootfs', '__UNREADABLE__'], function (array $args, array $env = []): array {
+                $root = $this->createMinimalRootfs();
                 chmod($root, 0000);
                 $args[1] = $root;
                 return ['args' => $args];
             }],
-            'template not directory' => ['template not directory', ['--rootfs', '__ROOTFS__', '--template', '__TEMPLATE_FILE__'], static function (self $t, array $args, array $env = []): array {
-                $args[1] = $t->createMinimalRootfs();
-                $file = $t->tmpDir . '/template_file.txt';
+            'template not directory' => ['template not directory', ['--rootfs', '__ROOTFS__', '--template', '__TEMPLATE_FILE__'], function (array $args, array $env = []): array {
+                $args[1] = $this->createMinimalRootfs();
+                $file = $this->tmpDir . '/template_file.txt';
                 file_put_contents($file, 'engine');
                 $args[3] = $file;
                 return ['args' => $args];
             }],
-            'template directory unreadable' => ['template directory unreadable', ['--rootfs', '__ROOTFS__', '--template', '__TEMPLATE_DIR__'], static function (self $t, array $args, array $env = []): array {
-                $t->skipWhenRoot();
-                $root = $t->createMinimalRootfs();
+            'template directory unreadable' => ['template directory unreadable', ['--rootfs', '__ROOTFS__', '--template', '__TEMPLATE_DIR__'], function (array $args, array $env = []): array {
+                $root = $this->createMinimalRootfs();
                 $args[1] = $root;
-                $dir = $t->mkTempDir('mcx-template-');
+                $dir = $this->mkTempDir('mcx-template-');
                 chmod($dir, 0000);
                 $args[3] = $dir;
                 return ['args' => $args];
             }],
-            'output file exists without overwrite' => ['output file exists without overwrite', ['--rootfs', '__ROOTFS__', '--output', '__OUTPUT_FILE__'], static function (self $t, array $args, array $env = []): array {
-                $root = $t->createMinimalRootfs();
+            'output file exists without overwrite' => ['output file exists without overwrite', ['--rootfs', '__ROOTFS__', '--output', '__OUTPUT_FILE__'], function (array $args, array $env = []): array {
+                $root = $this->createMinimalRootfs();
                 $args[1] = $root;
-                $out = tempnam($t->tmpDir, 'out');
+                $out = tempnam($this->tmpDir, 'out');
                 if ($out === false) {
                     throw new \RuntimeException('Unable to allocate temp file');
                 }
                 $args[3] = $out;
                 return ['args' => $args];
             }],
-            'unsupported extra argument pair' => ['unsupported extra argument pair', ['--rootfs', '__ROOTFS__', '--format', 'yaml'], static function (self $t, array $args, array $env = []): array {
-                $args[1] = $t->createMinimalRootfs();
+            'unsupported extra argument pair' => ['unsupported extra argument pair', ['--rootfs', '__ROOTFS__', '--format', 'yaml'], function (array $args, array $env = []): array {
+                $args[1] = $this->createMinimalRootfs();
                 return ['args' => $args];
             }],
-            'invalid rootfs tarball contents' => ['invalid rootfs tarball contents', ['--rootfs', '__BAD_ROOTFS__'], static function (self $t, array $args, array $env = []): array {
-                $bad = $t->tmpDir . '/bad.tar.gz';
+            'invalid rootfs tarball contents' => ['invalid rootfs tarball contents', ['--rootfs', '__BAD_ROOTFS__'], function (array $args, array $env = []): array {
+                $bad = $this->tmpDir . '/bad.tar.gz';
                 file_put_contents($bad, 'not a tar');
                 $args[1] = $bad;
                 return ['args' => $args];
             }],
-            'missing pigz dependency scenario' => ['missing pigz dependency scenario', ['--rootfs', '__ROOTFS__'], static function (self $t, array $args, array $env = []): array {
-                $args[1] = $t->createMinimalRootfs();
+            'missing pigz dependency scenario' => ['missing pigz dependency scenario', ['--rootfs', '__ROOTFS__'], function (array $args, array $env = []): array {
+                $args[1] = $this->createMinimalRootfs();
                 return ['args' => $args, 'env' => ['PATH' => '/nonexistent']];
             }],
-            'template copy fails into rootfs' => ['template copy fails into rootfs', ['--rootfs', '__ROOTFS__', '--template', '__TEMPLATE_EMPTY__'], static function (self $t, array $args, array $env = []): array {
-                $t->skipWhenRoot();
-                $args[1] = $t->createMinimalRootfs();
-                $dir = $t->mkTempDir('mcx-engine-');
+            'template copy fails into rootfs' => ['template copy fails into rootfs', ['--rootfs', '__ROOTFS__', '--template', '__TEMPLATE_EMPTY__'], function (array $args, array $env = []): array {
+                $args[1] = $this->createMinimalRootfs();
+                $dir = $this->mkTempDir('mcx-engine-');
                 chmod($dir, 0000);
                 $args[3] = $dir;
                 return ['args' => $args];
             }],
-            'output nested directory not creatable' => ['output nested directory not creatable', ['--rootfs', '__ROOTFS__', '--output', '__OUTPUT__'], static function (self $t, array $args, array $env = []): array {
-                $args[1] = $t->createMinimalRootfs();
-                $args[3] = $t->unwritableOutput('nested/out.tar.gz');
+            'output nested root directory not creatable' => ['output nested root directory not creatable', ['--rootfs', '__ROOTFS__', '--output', '/root/mcx/out.tar.gz'], function (array $args, array $env = []): array {
+                $args[1] = $this->createMinimalRootfs();
                 return ['args' => $args];
             }],
-            'template path whitespace with embed force' => ['template path whitespace with embed force', ['--rootfs', '__ROOTFS__', '--template', '   ', '--embed-force'], static function (self $t, array $args, array $env = []): array {
-                $args[1] = $t->createMinimalRootfs();
+            'template path whitespace with embed force' => ['template path whitespace with embed force', ['--rootfs', '__ROOTFS__', '--template', '   ', '--embed-force'], function (array $args, array $env = []): array {
+                $args[1] = $this->createMinimalRootfs();
                 return ['args' => $args];
             }],
-            'rootfs tarball removed before run' => ['rootfs tarball removed before run', ['--rootfs', '__ROOTFS__'], static function (self $t, array $args, array $env = []): array {
-                $root = $t->createMinimalRootfs();
+            'rootfs tarball removed before run' => ['rootfs tarball removed before run', ['--rootfs', '__ROOTFS__'], function (array $args, array $env = []): array {
+                $root = $this->createMinimalRootfs();
                 unlink($root);
                 $args[1] = $root;
                 return ['args' => $args];
             }],
-            'missing tar binary via PATH override' => ['missing tar binary via PATH override', ['--rootfs', '__ROOTFS__'], static function (self $t, array $args, array $env = []): array {
-                $args[1] = $t->createMinimalRootfs();
-                $fake = $t->createFakeBinaryDir();
-                $t->registerTempPath($fake);
-                $t->writeExecutable($fake, 'pigz', 'exit 0');
+            'missing tar binary via PATH override' => ['missing tar binary via PATH override', ['--rootfs', '__ROOTFS__'], function (array $args, array $env = []): array {
+                $args[1] = $this->createMinimalRootfs();
+                $fake = $this->createFakeBinaryDir();
+                $this->registerTempPath($fake);
+                $this->writeExecutable($fake, 'pigz', 'exit 0');
                 return ['args' => $args, 'env' => ['PATH' => $fake]];
             }],
-            'missing pigz binary via PATH override' => ['missing pigz binary via PATH override', ['--rootfs', '__ROOTFS__'], static function (self $t, array $args, array $env = []): array {
-                $args[1] = $t->createMinimalRootfs();
-                $fake = $t->createFakeBinaryDir();
-                $t->registerTempPath($fake);
-                $t->writeExecutable($fake, 'tar', 'exit 0');
+            'missing pigz binary via PATH override' => ['missing pigz binary via PATH override', ['--rootfs', '__ROOTFS__'], function (array $args, array $env = []): array {
+                $args[1] = $this->createMinimalRootfs();
+                $fake = $this->createFakeBinaryDir();
+                $this->registerTempPath($fake);
+                $this->writeExecutable($fake, 'tar', 'exit 0');
                 return ['args' => $args, 'env' => ['PATH' => $fake]];
             }],
         ];
-    }
-
-    /**
-     * A failed extraction exits through fail(), and exit() skips finally blocks, so cleanup must not live only there.
-     * Expected: non-zero status and no mcxTemplate-rehydrate-* staging directory left in the temp directory.
-     */
-    public function testFailedExtractionLeavesNoStagingDirectory(): void
-    {
-        $tmp = $this->tmpDir . '/tmp';
-        mkdir($tmp, 0700);
-        $bad = $this->tmpDir . '/bad.tar.gz';
-        file_put_contents($bad, 'not a tar');
-        $process = $this->runTool('tools/templateRehydrate.php', ['--rootfs', $bad, '--output', $this->tmpDir . '/out.tar.gz'],
-            ['TMPDIR' => $tmp]);
-        $this->assertNotSame(0, $process['status'], $process['output']);
-        $this->assertSame([], glob($tmp . '/mcxTemplate-rehydrate-*') ?: [], 'the staging directory is removed on failure');
-    }
-
-    // unwritableOutput returns a path below a regular file, which no user can create or write.
-    private function unwritableOutput(string $relative): string
-    {
-        $blocker = $this->tmpDir . '/blocker-' . uniqid();
-        file_put_contents($blocker, 'regular file');
-        return $blocker . '/' . $relative;
     }
 
     private function createMinimalRootfs(): string

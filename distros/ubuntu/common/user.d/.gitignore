@@ -1,3 +1,0 @@
-# Keep the user hook directory tracked while ignoring local overrides
-*
-!.gitignore

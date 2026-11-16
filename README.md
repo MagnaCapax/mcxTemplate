@@ -9,7 +9,7 @@ filesystem into place.
 
 - Linux-only templating engine that configures a prepared root filesystem from inside a chroot using PHP tasks and simple text templates.
 - Primary target: bare‑metal servers booted into a rescue/live environment; also suitable for VM images/guests (for example, KVM) that follow the same mount‑and‑chroot model.
-- Disk preparation (identify target disks, partition, format, extract, root password) lives in `installNode.php` and `src/Lib/Install/` ([ADR-0002](docs/adr/0002-disk-preparation-and-install-live-in-mcxtemplate.md), which supersedes the earlier note assigning it to mcxRescue). It is a dry run unless `--execute` and `"wipeAuthorized": true` are both given. The chroot tasks still assume filesystems are mounted under the target root, which `installNode.php` does for you or you do by hand as in the Quick Start.
+- Out of scope: destructive disk actions (partition/format/wipe). Those are handled upstream by the rescue workflow (e.g., mcxRescue). mcxTemplate assumes filesystems are already mounted under the target root.
 - Why it exists: deliver reproducible installs and rebuilds at scale, eliminate config drift, keep distro specifics versioned/auditable, and make provisioning fast, observable, and idempotent.
 
 ## Quick Start (Debian)
@@ -17,12 +17,11 @@ filesystem into place.
 This is a minimal, human-friendly first-run guide using the included Debian tasks and templates.
 
 - Build or obtain a template tarball
-  - Build a minimal Debian 12 rootfs from the Debian archive (root, needs mmdebstrap): `php tools/templateBuildDebian.php --suite=bookworm --packages=distros/debian/12/minimal.packages --out=/srv/build/debian-12-minimal-rootfs.tar.gz`, then release it with `tools/templateRelease.php --rootfs=...` (see `tools/README.md`, which also has the Ubuntu 24.04 build)
   - From a live host: `php tools/templateAssemble.php --source-host <host> --source-user root --output /srv/templates/debian-base.tar.gz`
   - From a disk image: `sudo php tools/templateCloneImage.php --image /path/debian.img --output /srv/templates/debian-base.tar.gz`
   - Validate contents: `php tools/check-template.php /srv/templates/debian-base.tar.gz`
 - Prepare target in rescue environment
-  - Partition, format, and mount the target root: `installNode.php` does this (see "Unattended install"); by hand, the steps below still apply.
+  - Partition, format, and mount the target root (outside mcxTemplate scope).
   - Extract the archive into the target root.
     - If built with `tools/templateAssemble.php` defaults, the engine is already embedded under `rootfs/opt/mcxTemplate`, so extraction is sufficient.
     - If you used `--no-embed-into-rootfs` or a raw stream via `templateCloneRemote.php`, copy the engine into `/opt/mcxTemplate` manually (e.g., from the `template/` directory in the archive).
@@ -43,49 +42,25 @@ Notes
 mcxTemplate assumes the provisioning host follows the mcxRescue workflow:
 
 1. **Boot rescue environment** – Nodes boot into mcxRescue (or another live
-   image) that provides the tools (`lsblk`, `parted`, `sgdisk`, `mdadm`, `tar`,
-   PHP) and a copy of this repository.
-2. **Partition and populate** – `installNode.php` matches the target disks by
-   serial against a JSON plan, refuses anything ambiguous, then wipes, partitions
-   and formats them, mounts the target paths and extracts the template tarball
-   onto the new root filesystem (see "Unattended install" below).
-3. **Chroot hand-off** – `installNode.php` enters the chroot and runs
-   `/opt/mcxTemplate/installTemplate.php --strict`. This entry point invokes the
-   distro configurator shipped in this repository.
+   image) that ships the disk preparation logic.
+2. **Partition and populate** – The rescue scripts wipe target disks, create
+   partitions, format filesystems, mount the target paths, and extract the
+   mcxTemplate tarball onto the new root filesystem.
+3. **Chroot hand-off** – mcxRescue enters the chroot and runs
+   `/opt/mcxTemplate/installTemplate.php`. This entry point invokes the distro
+   configurator shipped in this repository.
 4. **Distro configuration** – `distros/configure.php` detects the active distro,
    runs shared tasks from `distros/<distro>/common`, then executes any
    version-specific overrides. Hooks live entirely inside the target chroot, so
    every change directly affects the freshly cloned system.
-5. **Verify, logging and reboot** – `installNode.php` checks read-only that the
-   new system can boot (kernel and initrd, `grub.cfg`, fstab UUIDs, GRUB boot
-   code, `mdadm.conf`), then unmounts the target filesystems and stops the boot
-   array. In network mode (`--api` and `--mac`) the installer then sends the
-   result to nodeCore (generated root password, installed SSH host keys and other
-   facts) and retries until nodeCore acknowledges it. With `--reboot` it reboots into
-   the installed OS only after that acknowledgement; without `--reboot`, or in the
-   local `--plan` mode, rebooting is left to the caller (mcxRescue).
+5. **Logging and reboot** – mcxRescue captures stdout/stderr from the scripts,
+   unmounts the target filesystems, and reboots the machine into the installed
+   OS.
 
 This flow keeps the template build consistent and avoids running destructive
 operations inside the final system.
 
-## Unattended install (installNode.php)
-
-```
-php installNode.php --plan=/run/plan.json                  # dry run: device map + ordered command list, exit 0, nothing touched
-php installNode.php --plan=/run/plan.json --execute --secret-out=/run/root.secret
-```
-
-- The plan is untrusted JSON; every field is validated (see ADR-0002 for the fields). The template is a local file named by `template.path`, and its size and sha256 must equal the plan's. An execute run copies it once, hashing as it copies, into a new private directory `/run/mcxTemplate-stage-<jobId>` and extracts that copy (the copy is removed when the run ends; it needs the template's size again in RAM).
-- `--execute` also needs `"wipeAuthorized": true` in the plan and root. `--secret-out` receives the generated root password (new file, mode 0600, not under `/mnt/target`), written right before the password is set, never earlier; the password is never printed or logged.
-- The chroot configuration runs with `--strict` and a minimal fixed environment, and must end with the line `MCXTEMPLATE-STRICT-CONFIGURE-OK`; exit 0 without it counts as a failure. A read-only boot check follows before the run reports success.
-- Layouts: `biosSingle` (MBR, `/boot` + swap + root, optional `/home` split) and `biosNvmeUsbBoot` (two USB sticks as md RAID1 `/boot`, large disk GPT with swap and root). UEFI is not supported.
-- Exit codes: 0 ok, 2 refusal (`REFUSED <code>: ...` on stderr; codes such as `diskMissing`, `diskAmbiguous`, `unexpectedDisk`, `sizeMismatch`, `layoutSizeRefused`, `diskInUse`, `nodeIdentityMismatch`, `deviceChanged`, `wipeNotAuthorized`, `secretOutRequired`, `secretOutInvalid`, `notRoot`, `templateHashMismatch`, `templateStageRefused`, `stepFailed`, `verifyFailed`), 3 internal error, 64 usage.
-- Network mode: `installNode.php --api=https://host/ --mac=aa:bb:cc:dd:ee:ff [--execute [--reboot]]` says hello to nodeCore, takes its plan (validated like a local plan; the template path is never taken from nodeCore), downloads the template (`TemplateFetcher`) into the private staging directory, runs the same prepare and execute path, reports progress events, delivers the result and, with `--reboot`, reboots after the acknowledgement. Without `--execute` it only says hello and prints the plan. A machine nodeCore has not armed gets `not armed` and nothing is touched.
-- Status: the logic is covered by unit tests with a fake command runner, and the install, including the network mode, has been run on real hardware; fixes found by those runs are in the git history from 2026-11-12 on (for example `7ce1285`, `19514db`). UEFI layouts are not supported.
-
 ## Repository Layout
-
-- `installNode.php`, `src/Lib/Install/` – the unattended install core described above.
 
 - `distros/configure.php` – Main orchestrator invoked by `installTemplate.php`.
 - `distros/<distro>/common/tasks/` – Ordered PHP tasks executed for the
@@ -127,16 +102,12 @@ template. Common options include:
 - `--hostname=<fqdn>` – Fully-qualified hostname to apply inside the chroot.
 - `--host-ip=<address>` – Primary host IP for `/etc/hosts` when the network is
   not discoverable automatically.
-- `--network-cidr=<cidr>` / `--gateway=<address>` – The address and gateway to
-  write (the installer always passes them). Without them task 22 falls back to
-  the rescue environment's own address and default route.
+- `--network-cidr=<cidr>` / `--gateway=<address>` – Override network detection
+  when the rescue environment cannot infer routes.
 - `--hosts-template=<path>` – Custom `/etc/hosts` template containing
   `{{SHORT_HOSTNAME}}`, `{{FQDN}}`, and `{{HOST_IP}}` placeholders.
 - `--primary-interface=<name>` – Override the detected primary network interface used when
-  rendering distro templates. Without it the rescue's default-route NIC is used, named as
-  the installed system will name it: a template whose GRUB defaults carry
-  `net.ifnames=0` gets `eth<N>` (N = the NIC's place among physical NICs by ifindex),
-  not the rescue's `eno1`.
+  rendering distro templates.
 
 **Storage**
 
@@ -169,12 +140,6 @@ legacy flags); mcxTemplate validates this before writing `/etc/fstab`.
   a particular run.
 - `--dry-run` – Print the task plan (respecting `--skip-tasks`) without executing
   any scripts.
-- `--strict` – Opt-in. A failed task makes the run exit 1 and print a failure
-  summary instead of "completed successfully". When every task ran and
-  succeeded (no `--dry-run`, no skipped tasks) the last line is
-  `MCXTEMPLATE-STRICT-CONFIGURE-OK`, which `installNode.php` requires. Without
-  `--strict` a failed task stays a warning, the exit code is 0 and the output is
-  unchanged, as before.
 
 The script only requires root once it begins executing tasks; informational
 actions like `--help` can be run without elevated privileges.

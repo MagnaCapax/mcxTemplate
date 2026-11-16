@@ -20,7 +20,7 @@ final class SystemTest extends TestCase
     }
 
     // provideExistingCommands lists binaries that the suite relies on for other checks.
-    public static function provideExistingCommands(): array
+    public function provideExistingCommands(): array
     {
         return [
             'sh shell' => ['sh'],
@@ -39,7 +39,7 @@ final class SystemTest extends TestCase
     }
 
     // provideMissingCommands enumerates the surprising inputs we guard against.
-    public static function provideMissingCommands(): array
+    public function provideMissingCommands(): array
     {
         return [
             'obvious gibberish' => ['definitely-not-real'],
@@ -61,7 +61,7 @@ final class SystemTest extends TestCase
     }
 
     // provideSuccessfulRunCommands keeps the exit-zero cases varied for coverage.
-    public static function provideSuccessfulRunCommands(): array
+    public function provideSuccessfulRunCommands(): array
     {
         return [
             'true binary' => [['true']],
@@ -81,7 +81,7 @@ final class SystemTest extends TestCase
     }
 
     // provideFailingRunCommands illustrates common failure patterns to protect against.
-    public static function provideFailingRunCommands(): array
+    public function provideFailingRunCommands(): array
     {
         return [
             'false binary' => [['false'], 1],
@@ -129,7 +129,7 @@ final class SystemTest extends TestCase
     }
 
     // provideCaptureSuccessCases includes tricky whitespace and newline handling scenarios.
-    public static function provideCaptureSuccessCases(): array
+    public function provideCaptureSuccessCases(): array
     {
         return [
             'php echo' => [[PHP_BINARY, '-r', 'echo "ping";'], 'ping'],
@@ -150,7 +150,7 @@ final class SystemTest extends TestCase
     }
 
     // provideCaptureFailureCases lists how stdout behaves when commands fail in messy ways.
-    public static function provideCaptureFailureCases(): array
+    public function provideCaptureFailureCases(): array
     {
         return [
             'stdout before failure' => [['sh', '-c', 'echo fail; exit 3'], 'fail', 3],
@@ -185,7 +185,7 @@ final class SystemTest extends TestCase
     }
 
     // provideRunIfCommandExistsFailures combines missing binaries and non-zero exits.
-    public static function provideRunIfCommandExistsFailures(): array
+    public function provideRunIfCommandExistsFailures(): array
     {
         return [
             'missing command' => ['definitely-not-real', []],
